@@ -1,0 +1,2 @@
+# kainstall
+基于kubeadmin一键部署kubernetes集群
