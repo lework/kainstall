@@ -553,7 +553,7 @@ function init() {
 
     # 设置主机名
     ssh_exec "${host}" "
-      echo "$INIT_NODE $" >> /etc/hosts
+      echo "$INIT_NODE $KUBE_APISERVER" >> /etc/hosts
       hostnamectl set-hostname ${HOSTNAME_PREFIX}-master-node${index}
     "
     if [ $? -ne 0 ]; then
