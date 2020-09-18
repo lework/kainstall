@@ -968,13 +968,13 @@ while [ "${1:-}" != "" ]; do
                                 WORKER_NODES=$(echo $1 | tr ',' ' ')
                                 ;;
         -u | --user )           shift
-				                SSH_USER=$1
+                                SSH_USER=$1
                                 ;;
         -p | --password )       shift
-				                SSH_PASSWORD=$1
+                                SSH_PASSWORD=$1
                                 ;;
         -P | --port )           shift
-				                SSH_PORT=$1
+                                SSH_PORT=$1
                                 ;;
         -v | --version )        shift
                                 unset KUBE_VERSION
