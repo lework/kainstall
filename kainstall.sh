@@ -7,7 +7,7 @@
 #Email         	: lework@yeah.net
 ###################################################################
 
-set -o errexit          # Exit on most errors (see the manual)
+
 set -o errtrace         # Make sure any error trap is inherited
 set -o nounset          # Disallow expansion of unset variables
 set -o pipefail         # Use last non-zero exit code in a pipeline
@@ -46,6 +46,8 @@ HOSTNAME_PREFIX="k8s"
 LOG_FILE="$(mktemp)"
 SSH_OPTIONS="-o ConnectTimeout=600 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
+
+trap 'echo -e "\n\n  See detailed log >>> $LOG_FILE \n\n"' 1 2 3 15 EXIT
 
 ######################################################################################################
 # function
@@ -119,7 +121,7 @@ DefaultLimitNPROC=655360
 EOF
 
    # Change sysctl
-   cat << EOF >  /etc/sysctl.d/00-sysctl.conf
+   cat << EOF >  /etc/sysctl.d/99-kube.conf
 #############################################################################################
 # 调整虚拟内存
 #############################################################################################
@@ -321,7 +323,7 @@ kernel.randomize_va_space = 2
 # 调高 PID 数量
 kernel.pid_max = 65536
 EOF
-  sysctl -p
+  sysctl --system
 
   # history
   cat << EOF >> /etc/bashrc
@@ -401,7 +403,7 @@ EOF
 
 
 function install_docker() {
-  local docker_version="-${DOCKER_VERSION:-'19.03.12'}"
+  local version="-${1:-19.03.12}"
 
   cat << EOF > /etc/yum.repos.d/docker-ce.repo
 [docker-ce-stable]
@@ -421,8 +423,8 @@ EOF
                 docker-logrotate \
                 docker-engine 2> /dev/null
 
-  yum install -y docker-ce${docker_version} \
-                 docker-ce-cli${docker_version} \
+  yum install -y docker-ce${version} \
+                 docker-ce-cli${version} \
                  containerd.io  \
                  bash-completion > /dev/null
   
@@ -468,7 +470,7 @@ EOF
 
 function install_kube() {
 
-  local kube_version="-${KUBE_VERSION:-'1.19.2'}"
+  local version="-${1:-1.19.2}"
   cat <<EOF > /etc/yum.repos.d/kubernetes.repo
 [kubernetes]
 name=Kubernetes
@@ -479,9 +481,9 @@ repo_gpgcheck=1
 gpgkey=https://mirrors.aliyun.com/kubernetes/yum/doc/yum-key.gpg https://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg
 EOF
 
-  yum install -y kubeadm${kube_version} \
-                 kubelet${kube_version} \
-                 kubectl${kube_version} \
+  yum install -y kubeadm${version} \
+                 kubelet${version} \
+                 kubectl${version} \
                  --disableexcludes=kubernetes
 
   [ -d /etc/bash_completion.d ] && kubectl completion bash > /etc/bash_completion.d/kubectl
@@ -551,7 +553,7 @@ function init() {
 
     # 设置主机名
     ssh_exec "${host}" "
-      echo "$INIT_NODE apiserver.cluster.local" >> /etc/hosts
+      echo "$INIT_NODE $" >> /etc/hosts
       hostnamectl set-hostname ${HOSTNAME_PREFIX}-master-node${index}
     "
     if [ $? -ne 0 ]; then
@@ -602,7 +604,7 @@ function init() {
 
     # 设置主机名
     ssh_exec "${host}" "
-      echo '127.0.0.1 apiserver.cluster.local' >> /etc/hosts
+      echo '127.0.0.1 $KUBE_APISERVER' >> /etc/hosts
       hostnamectl set-hostname ${HOSTNAME_PREFIX}-worker-node${index}
     "
 
@@ -696,7 +698,7 @@ function install_package() {
    do
      # install docker
      log::info "[install]" "install docker on $host."
-     ssh_exec "${host}" "$(declare -f install_docker);install_docker"
+     ssh_exec "${host}" "$(declare -f install_docker);install_docker $DOCKER_VERSION"
      if [ $? -ne 0 ]; then
        log::err "[install]" "install docker on $host error."
      else 
@@ -705,7 +707,7 @@ function install_package() {
 
      # install kube
      log::info "[install]" "install kube on $host"
-     ssh_exec "${host}" "$(declare -f install_kube);install_kube"
+     ssh_exec "${host}" "$(declare -f install_kube);install_kube $KUBE_VERSION"
      if [ $? -ne 0 ]; then
        log::err "[install]" "install kube on $host error."
      else 
@@ -782,6 +784,7 @@ EOF
 "   
      if [ $? -ne 0 ]; then
        log::err "[kubeadm init]" "$host: set kubeadmcfg.yaml error."
+       exit 1
      else 
        log::info "[kubeadm init]" "$host: set kubeadmcfg.yaml succeeded."
      fi
@@ -790,6 +793,7 @@ EOF
      ssh_exec "${host}" "kubeadm init --config=/tmp/kubeadmcfg.yaml --upload-certs"
      if [ $? -ne 0 ]; then
        log::err "[kubeadm init]" "$host: kubeadm init error."
+       exit 1
      else 
        log::info "[kubeadm init]" "$host: kubeadm init succeeded."
      fi
@@ -814,6 +818,11 @@ EOF
           kubeadm join $KUBE_APISERVER:6443 --token $INIT_TOKEN --discovery-token-ca-cert-hash sha256:$CACRT_HASH --control-plane --certificate-key $INTI_CERTKEY
           sed -i 's#$INIT_NODE $KUBE_APISERVER#127.0.0.1 $KUBE_APISERVER#g' /etc/hosts
         "
+        if [ $? -ne 0 ]; then
+          log::err "[kubeadm init]" "master $host join cluster error."
+        else 
+          log::info "[kubeadm init]" "master $host join cluster succeeded."
+        fi
     fi
   done
 
@@ -821,8 +830,13 @@ EOF
   do
     log::info "[kubeadm init]" "worker $host join cluster."
     ssh_exec "${host}" "
-      kubeadm join apiserver.cluster.local:6443 --token $INIT_TOKEN --discovery-token-ca-cert-hash sha256:$CACRT_HASH
+      kubeadm join $KUBE_APISERVER:6443 --token $INIT_TOKEN --discovery-token-ca-cert-hash sha256:$CACRT_HASH
     "
+    if [ $? -ne 0 ]; then
+      log::err "[kubeadm init]" "worker $host join cluster error."
+    else 
+      log::info "[kubeadm init]" "worker $host join cluster succeeded."
+    fi
   done
 
   log::info "[kubeadm init]" "set worker node role."
@@ -905,12 +919,12 @@ function usage {
     echo "Install kubernetes cluster using kubeadm."
     echo
     echo "Usage: $0 init|reset [-m master] [-w worker] [-u user] [-p password] [-P port] [-v version]"
-    echo "  -m,--master     master node"
-    echo "  -w,--worker     work node"
-    echo "  -u,--user       ssh user"
-    echo "  -p,--password   ssh password"
-    echo "  -P,--port       ssh port"
-    echo "  -v,--version    kube version"
+    echo "  -m,--master     master node, default: ${MASTER_NODES}"
+    echo "  -w,--worker     work node, default: ''"
+    echo "  -u,--user       ssh user, default: ${SSH_USER}"
+    echo "  -p,--password   ssh password,default: ${SSH_PASSWORD}"
+    echo "  -P,--port       ssh port, default: ${SSH_PORT}"
+    echo "  -v,--version    kube version , default: ${KUBE_VERSION}"
     echo
     echo
     echo "Example:"
@@ -920,7 +934,7 @@ function usage {
     echo "  --worker 192.168.77.133,192.168.77.134,192.168.77.135 \\"
     echo "  --user root \\"
     echo "  --password 123456 \\"
-    echo "  -- 1.19.2\\"
+    echo "  --version 1.19.2\\"
     echo
     echo "  [reset] node"
     echo "  $0 reset \\"
@@ -959,7 +973,11 @@ while [ "${1:-}" != "" ]; do
         -p | --password )       shift
 				                SSH_PASSWORD=$1
                                 ;;
+        -P | --port )           shift
+				                SSH_PORT=$1
+                                ;;
         -v | --version )        shift
+                                unset KUBE_VERSION
                                 KUBE_VERSION=$1
                                 ;;
         * )                     usage
@@ -978,4 +996,4 @@ else
   usage
 fi
 
-echo -e "\n\n  See detailed log >>> $LOG_FILE \n\n"
+#echo -e "\n\n  See detailed log >>> $LOG_FILE \n\n"
