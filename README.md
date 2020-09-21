@@ -43,6 +43,7 @@ wget https://cdn.jsdelivr.net/gh/lework/kainstall/kainstall.sh
 
 ```bash
 # bash kainstall.sh 
+
 Install kubernetes cluster using kubeadm.
 
 Usage: kainstall.sh init|reset|add|del [-m master] [-w worker] [-u user] [-p password] [-P port] [-v version]
@@ -51,25 +52,25 @@ Usage: kainstall.sh init|reset|add|del [-m master] [-w worker] [-u user] [-p pas
   -u,--user       ssh user, default: root
   -p,--password   ssh password,default: 123456
   -P,--port       ssh port, default: 22
-  -v,--version    kube version , default: 1.19.2
+  -v,--version    kube version, default: latest
 
 
 Example:
-  [init node]
+  [cluster node]
   kainstall.sh init \
   --master 192.168.77.130,192.168.77.131,192.168.77.132 \
   --worker 192.168.77.133,192.168.77.134,192.168.77.135 \
   --user root \
   --password 123456 \
-  --version 1.19.2 \
+  --version 1.19.2
 
-  [reset node]
+  [cluster node]
   kainstall.sh reset \
   --master 192.168.77.130,192.168.77.131,192.168.77.132 \
   --worker 192.168.77.133,192.168.77.134,192.168.77.135 \
   --user root \
   --password 123456 \
-  --version 1.19.2 \
+  --version 1.19.2
 
   [add node]
   kainstall.sh add \
@@ -77,7 +78,7 @@ Example:
   --worker 192.168.77.143,192.168.77.144 \
   --user root \
   --password 123456 \
-  --version 1.19.2 \
+  --version 1.19.2
 
   [del node]
   kainstall.sh del \
@@ -85,7 +86,7 @@ Example:
   --worker 192.168.77.143,192.168.77.144 \
   --user root \
   --password 123456 \
-  --version 1.19.2 \
+  --version 1.19.2
 
 
   See detailed log >>> /tmp/kainstall.RBfHgbjYUG/kainstall.log 

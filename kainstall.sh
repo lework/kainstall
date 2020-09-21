@@ -18,9 +18,11 @@ set -o pipefail         # Use last non-zero exit code in a pipeline
 ######################################################################################################
 
 # 版本
-DOCKER_VERSION="19.03.12"
-KUBE_VERSION="1.19.2"
-
+DOCKER_VERSION="latest"
+KUBE_VERSION="latest"
+FLANNEL_VERSION="0.12.0"
+METRICS_SERVER_VERSION="0.3.7"
+   
 # kubeadm
 KUBE_APISERVER="apiserver.cluster.local"
 KUBE_POD_SUBNET="10.244.0.0/16"
@@ -55,11 +57,11 @@ trap 'echo -e "\n\n  See detailed log >>> $LOG_FILE \n\n";exit' 1 2 3 15 EXIT
 ######################################################################################################
 
 log::err() {
-  printf "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[31mERROR: \033[0m$*\n" | tee -a $LOG_FILE
+  printf "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[31mERROR:   \033[0m$*\n" | tee -a $LOG_FILE
 }
 
 log::info() {
-  printf "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[32mINFO: \033[0m$*\n" | tee -a $LOG_FILE
+  printf "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[32mINFO:    \033[0m$*\n" | tee -a $LOG_FILE
 }
 
 log::warning() {
@@ -572,7 +574,8 @@ function init_add_node() {
 function install_docker() {
   # 安装docker
   
-  local version="-${1:-19.03.12}"
+  local version="-${1:-latest}"
+  version="${version#-latest}"
 
   cat << EOF > /etc/yum.repos.d/docker-ce.repo
 [docker-ce-stable]
@@ -597,8 +600,9 @@ EOF
                  containerd.io  \
                  bash-completion
   
-  cp /usr/share/bash-completion/completions/docker /etc/bash_completion.d/
-  
+  [ ! -f /usr/share/bash-completion/completions/docker ] && \
+    cp -f /usr/share/bash-completion/completions/docker /etc/bash_completion.d/
+
   [ ! -d /etc/docker ] && mkdir /etc/docker
   cat << EOF > /etc/docker/daemon.json
 {
@@ -640,7 +644,9 @@ EOF
 function install_kube() {
   # 安装kube组件
   
-  local version="-${1:-1.19.2}"
+  local version="-${1:-latest}"
+  version="${version#-latest}"
+  
   cat <<EOF > /etc/yum.repos.d/kubernetes.repo
 [kubernetes]
 name=Kubernetes
@@ -961,12 +967,12 @@ function kube_addon() {
    # 添加addon组件
 
    log::info "[addon]" "add flannel"
-   wget https://cdn.jsdelivr.net/gh/coreos/flannel@v0.12.0/Documentation/kube-flannel.yml -O ${TMP_DIR}/kube-flannel.yml >> $LOG_FILE 2>&1
+   wget https://cdn.jsdelivr.net/gh/coreos/flannel@v${FLANNEL_VERSION}/Documentation/kube-flannel.yml -O ${TMP_DIR}/kube-flannel.yml >> $LOG_FILE 2>&1
    sed -i "s#10.244.0.0/16#$KUBE_POD_SUBNET#g" ${TMP_DIR}/kube-flannel.yml
    local manifest=$(cat ${TMP_DIR}/kube-flannel.yml)
    ssh_exec "${INIT_NODE}" "
      cat <<EOF | kubectl --validate=false apply -f -
-$(printf "\"$manifest"\")
+$(printf "%s" "$manifest")
 EOF
    "
    if [ $? -ne 0 ]; then
@@ -976,14 +982,14 @@ EOF
    fi
 
    log::info "[addon]" "add metrics-server"
-   wget https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.3.7/components.yaml -O ${TMP_DIR}/metrics-server.yml  >> $LOG_FILE 2>&1
+   wget https://github.com/kubernetes-sigs/metrics-server/releases/download/v${METRICS_SERVER_VERSION}/components.yaml -O ${TMP_DIR}/metrics-server.yml  >> $LOG_FILE 2>&1
    sed -i "s#k8s.gcr.io/metrics-server#$KUBE_IMAGE_REPO#g" ${TMP_DIR}/metrics-server.yml
    sed -i '/--secure-port=4443/a\          - --kubelet-insecure-tls' ${TMP_DIR}/metrics-server.yml
    sed -i '/--secure-port=4443/a\          - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname' ${TMP_DIR}/metrics-server.yml
    local manifest=$(cat ${TMP_DIR}/metrics-server.yml)
    ssh_exec "${INIT_NODE}" "
      cat <<EOF | kubectl --validate=false apply -f -
-$(printf "\"$manifest\"")
+$(printf "%s" "$manifest")
 EOF
    "
    if [ $? -ne 0 ]; then
@@ -1048,20 +1054,20 @@ function start_init() {
   INIT_NODE=$(echo $MASTER_NODES | awk '{print $1}')
 
   # 1. 预检测
-#  check
+  check
   # 2. 初始化集群
-#  init
+  init
   # 3. 安装包
-#  install_package
+  install_package
   # 4. 加载提供的文件
   # 5. 初始化kubeadm
-#  kubeadm_init
+  kubeadm_init
   # 6. 加入集群
-#  join_cluster
+  join_cluster
   # 7. 安装addon
   kube_addon
   # 8. 查看集群状态
-#  kube_status
+  kube_status
 }
 
 
@@ -1114,6 +1120,8 @@ function del_node() {
 
 function usage {
   # 使用帮助
+  
+  echo
   echo "Install kubernetes cluster using kubeadm."
   echo
   echo "Usage: $0 init|reset|add|del [-m master] [-w worker] [-u user] [-p password] [-P port] [-v version]"
@@ -1126,21 +1134,21 @@ function usage {
   echo
   echo
   echo "Example:"
-  echo "  [init node]"
+  echo "  [cluster node]"
   echo "  $0 init \\"
   echo "  --master 192.168.77.130,192.168.77.131,192.168.77.132 \\"
   echo "  --worker 192.168.77.133,192.168.77.134,192.168.77.135 \\"
   echo "  --user root \\"
   echo "  --password 123456 \\"
-  echo "  --version 1.19.2 \\"
+  echo "  --version 1.19.2"
   echo
-  echo "  [reset node]"
+  echo "  [cluster node]"
   echo "  $0 reset \\"
   echo "  --master 192.168.77.130,192.168.77.131,192.168.77.132 \\"
   echo "  --worker 192.168.77.133,192.168.77.134,192.168.77.135 \\"
   echo "  --user root \\"
   echo "  --password 123456 \\"
-  echo "  --version 1.19.2 \\"
+  echo "  --version 1.19.2"
   echo
   echo "  [add node]"
   echo "  $0 add \\"
@@ -1148,7 +1156,7 @@ function usage {
   echo "  --worker 192.168.77.143,192.168.77.144 \\"
   echo "  --user root \\"
   echo "  --password 123456 \\"
-  echo "  --version 1.19.2 \\"
+  echo "  --version 1.19.2"
   echo
   echo "  [del node]"
   echo "  $0 del \\"
@@ -1156,7 +1164,7 @@ function usage {
   echo "  --worker 192.168.77.143,192.168.77.144 \\"
   echo "  --user root \\"
   echo "  --password 123456 \\"
-  echo "  --version 1.19.2 \\"
+  echo "  --version 1.19.2"
   exit 1
 }
 
