@@ -135,7 +135,7 @@ bash kainstall.sh add --worker 192.168.77.134
 bash kainstall.sh add --master 192.168.77.135,192.168.77.136 --worker 192.168.77.137,192.168.77.138
 ```
 
-### 添加ingres
+### 添加ingress
 
 > 操作需在 k8s master 节点上操作，ssh连接信息非默认时请指定
 
