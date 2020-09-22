@@ -1,5 +1,5 @@
 # kainstall  = kubeadm install
-基于kubeadmin一键部署kubernetes集群
+基于 kubeadm 一键部署 kubernetes 集群
 
 
 
@@ -18,6 +18,8 @@ OS: `centos 7.x`
 CPU: `2C`
 
 MEM: `2G`
+
+> 需要连通外网，用于下载 kube 组件和 docker 镜像。
 
 
 
@@ -46,14 +48,24 @@ wget https://cdn.jsdelivr.net/gh/lework/kainstall/kainstall.sh
 
 Install kubernetes cluster using kubeadm.
 
-Usage: kainstall.sh init|reset|add|del [-m master] [-w worker] [-u user] [-p password] [-P port] [-v version]
-  -m,--master     master node, default: 127.0.0.1
+Usage:
+  kainstall.sh [command]
+
+Available Commands:
+  init            init Kubernetes cluster.
+  reset           reset Kubernetes cluster.
+  add             add nodes to the cluster.
+  del             remove node from the cluster.
+
+Flag:
+  -m,--master     master node, default: ''
   -w,--worker     work node, default: ''
   -u,--user       ssh user, default: root
   -p,--password   ssh password,default: 123456
   -P,--port       ssh port, default: 22
   -v,--version    kube version, default: latest
-
+  -n,--network    cluster network, choose: [flannel,calico], default: flannel
+  -i,--ingress    ingress controller, choose: [nginx,traefik], default: nginx
 
 Example:
   [cluster node]
@@ -62,7 +74,9 @@ Example:
   --worker 192.168.77.133,192.168.77.134,192.168.77.135 \
   --user root \
   --password 123456 \
-  --version 1.19.2
+  --version 1.19.2 \
+  --network flannel \
+  --ingress nginx
 
   [cluster node]
   kainstall.sh reset \
@@ -120,6 +134,17 @@ bash kainstall.sh add --worker 192.168.77.134
 # 同时增加
 bash kainstall.sh add --master 192.168.77.135,192.168.77.136 --worker 192.168.77.137,192.168.77.138
 ```
+
+### 添加ingres
+
+> 操作需在 k8s master 节点上操作，ssh连接信息非默认时请指定
+
+```bash
+# 添加 nginx ingress
+bash kainstall.sh add --ingress nginx
+```
+
+
 
 ### 删除节点
 
