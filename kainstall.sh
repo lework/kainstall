@@ -2,7 +2,7 @@
 ###################################################################
 #Script Name	: kainstall.sh
 #Description	: Install kubernetes cluster using kubeadm.
-#Update Date    : 2020-09-22
+#Update Date    : 2020-09-18
 #Author       	: lework
 #Email         	: lework@yeah.net
 ###################################################################
@@ -25,6 +25,7 @@ METRICS_SERVER_VERSION="0.3.7"
 INGRESS_NGINX="0.35.0"
 TRAEFIK_VERSION="2.2.11"
 CALICO_VERSION="3.16.1"
+KUBE_PROMETHEUS_VERSION="0.6.0"
  
 # 集群配置
 KUBE_APISERVER="apiserver.cluster.local"
@@ -33,6 +34,7 @@ KUBE_SERVICE_SUBNET="10.96.0.0/16"
 KUBE_IMAGE_REPO="registry.aliyuncs.com/k8sxio"
 KUBE_NETWORK="flannel"
 KUBE_INGRESS="nginx"
+KUBE_MONITOR="prometheus"
 
 # 定义的master和worker节点地址，以逗号分隔
 MASTER_NODES=""
@@ -61,38 +63,38 @@ trap 'echo -e "\n\n  See detailed log >>> $LOG_FILE \n\n";exit' 1 2 3 15 EXIT
 # function
 ######################################################################################################
 
-log::err() {
+function log::err() {
   printf "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[31mERROR:   \033[0m$*\n" | tee -a $LOG_FILE
 }
 
-log::info() {
+function log::info() {
   printf "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[32mINFO:    \033[0m$*\n" | tee -a $LOG_FILE
 }
 
-log::warning() {
+function log::warning() {
   printf "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[33mWARNING: \033[0m$*\n" | tee -a $LOG_FILE
 }
 
 
 function exec_command() {
-   # 执行命令
+  # 执行命令
 
-   local host=${1:-}
-   shift
-   local command="$@"
+  local host=${1:-}
+  shift
+  local command="$@"
 
-   if [[ "x${host}" == "x127.0.0.1" ]]; then
-     # 本地执行
-     echo "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: INFO: [exec] \"${command}\"" >> $LOG_FILE
-     bash -c "${command}" >> $LOG_FILE 2>&1
-     local status=$?
-   else
-     # 远程执行
-     echo "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: INFO: [exec] sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${host}:${SSH_PORT} \"${command}\"" >> $LOG_FILE
-     sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} "${command}" >> $LOG_FILE 2>&1
-     local status=$?
-   fi
-   return $status
+  if [[ "x${host}" == "x127.0.0.1" ]]; then
+    # 本地执行
+    echo "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: INFO: [exec] \"${command}\"" >> $LOG_FILE
+    bash -c "${command}" >> $LOG_FILE 2>&1
+    local status=$?
+  else
+    # 远程执行
+    echo "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: INFO: [exec] sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${host}:${SSH_PORT} \"${command}\"" >> $LOG_FILE
+    sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} "${command}" >> $LOG_FILE 2>&1
+    local status=$?
+  fi
+  return $status
 }
 
 
@@ -403,7 +405,7 @@ EOF
   chronyc sources -v > /dev/null
   chronyc sourcestats > /dev/null
 
- # ipvs
+  # ipvs
   yum install -y ipvsadm ipset sysstat conntrack libseccomp
   module=(
   ip_vs
@@ -430,33 +432,21 @@ function init() {
   do
     log::info "[init]" "master: $host"
     exec_command "${host}" "$(declare -f init_node); init_node"
-    if [ $? -ne 0 ]; then
-      log::err "[init]" "init master $host error."
-    else 
-      log::info "[init]" "init master $host succeeded."
-    fi
+    check_exit_code "$?" "init" "init master $host"
 
     # 设置主机名
     exec_command "${host}" "
       echo "$INIT_NODE $KUBE_APISERVER" >> /etc/hosts
       hostnamectl set-hostname ${HOSTNAME_PREFIX}-master-node${index}
     "
-    if [ $? -ne 0 ]; then
-      log::err "[init]" "$host set hostname error."
-    else 
-      log::info "[init]" "$host set hostname succeeded."
-    fi
+    check_exit_code "$?" "init" "$host set hostname"
 
     # 设置主机名解析
     local i=1
     for h in $MASTER_NODES
     do
       exec_command "${host}" "echo '$h ${HOSTNAME_PREFIX}-master-node${i}'  >> /etc/hosts"
-      if [ $? -ne 0 ]; then
-        log::err "[init]" "$host add $h hostname resolve error."
-      else 
-        log::info "[init]" "$host add $h hostname resolve succeeded."
-      fi
+      check_exit_code "$?" "init" "$host: add $h hostname resolve"
       i=$((i + 1))
     done
     
@@ -464,11 +454,7 @@ function init() {
     for h in $WORKER_NODES
     do
       exec_command "${host}" "echo '$h ${HOSTNAME_PREFIX}-worker-node${i}'  >> /etc/hosts"
-      if [ $? -ne 0 ]; then
-        log::err "[init]" "$host add $h hostname resolve error."
-      else 
-        log::info "[init]" "$host add $h hostname resolve succeeded."
-      fi
+      check_exit_code "$?" "init" "$host: add $h hostname resolve"
       i=$((i + 1))
     done
     
@@ -481,11 +467,7 @@ function init() {
   do
     log::info "[init]" "worker: $host"
     exec_command "${host}" "$(declare -f init_node); init_node"
-    if [ $? -ne 0 ]; then
-      log::err "[init]" "init worker $host error."
-    else 
-      log::info "[init]" "init worker $host succeeded."
-    fi
+    check_exit_code "$?" "init" "init worker $host"
 
     # 设置主机名
     exec_command "${host}" "
@@ -498,11 +480,7 @@ function init() {
     for h in $MASTER_NODES
     do
       exec_command "${host}" "echo '$h ${HOSTNAME_PREFIX}-master-node${i}'  >> /etc/hosts"
-      if [ $? -ne 0 ]; then
-        log::err "[init]" "$host add $h hostname resolve error."
-      else 
-        log::info "[init]" "$host add $h hostname resolve succeeded."
-      fi
+      check_exit_code "$?" "init" "$host: add $h hostname resolve"
       i=$((i + 1))
     done
     
@@ -510,17 +488,12 @@ function init() {
     for h in $WORKER_NODES
     do
       exec_command "${host}" "echo '$h ${HOSTNAME_PREFIX}-worker-node${i}'  >> /etc/hosts"
-      if [ $? -ne 0 ]; then
-        log::err "[init]" "$host add $h hostname resolve error."
-      else 
-        log::info "[init]" "$host add $h hostname resolve succeeded."
-      fi
+      check_exit_code "$?" "init" "$host: add $h hostname resolve"
       i=$((i + 1))
     done
 
     index=$((index + 1))
   done
-  
 }
 
 
@@ -539,11 +512,7 @@ function init_add_node() {
   do
     log::info "[init]" "master: $host"
     exec_command "${host}" "$(declare -f init_node); init_node"
-    if [ $? -ne 0 ]; then
-      log::err "[init]" "init master $host error."
-    else 
-      log::info "[init]" "init master $host succeeded."
-    fi
+    check_exit_code "$?" "init" "init master $host"
 
     # 设置主机名和解析
     exec_command "${host}" "
@@ -552,11 +521,7 @@ function init_add_node() {
       echo "${host} ${HOSTNAME_PREFIX}-master-node${index}" >> /etc/hosts
       hostnamectl set-hostname ${HOSTNAME_PREFIX}-master-node${index}
     "
-    if [ $? -ne 0 ]; then
-      log::err "[init]" "$host set hostname error."
-    else 
-      log::info "[init]" "$host set hostname succeeded."
-    fi
+    check_exit_code "$?" "init" "$host set hostname and resolve"
     index=$((index + 1))
   done
    
@@ -567,11 +532,7 @@ function init_add_node() {
   do
     log::info "[init]" "worker: $host"
     exec_command "${host}" "$(declare -f init_node); init_node"
-    if [ $? -ne 0 ]; then
-      log::err "[init]" "init worker $host error."
-    else 
-      log::info "[init]" "init worker $host succeeded."
-    fi
+    check_exit_code "$?" "init" "init worker $host"
 
     # 设置主机名和解析
     exec_command "${host}" "
@@ -580,9 +541,9 @@ function init_add_node() {
       echo "${host} ${HOSTNAME_PREFIX}-worker-node${index}" >> /etc/hosts
       hostnamectl set-hostname ${HOSTNAME_PREFIX}-worker-node${index}
     "
+    check_exit_code "$?" "init" "$host set hostname and resolve"
     index=$((index + 1))
   done
-  
 }
 
 
@@ -727,7 +688,6 @@ EOF
 
   systemctl restart haproxy
   systemctl enable haproxy
-
 }
 
 
@@ -739,21 +699,12 @@ function install_package() {
     # install docker
     log::info "[install]" "install docker on $host."
     exec_command "${host}" "$(declare -f install_docker);install_docker $DOCKER_VERSION"
-    if [ $? -ne 0 ]; then
-      log::err "[install]" "install docker on $host error."
-    else 
-      log::info "[install]" "install docker on $host succeeded."
-    fi
+    check_exit_code "$?" "install" "install docker on $host"
 
     # install kube
     log::info "[install]" "install kube on $host"
     exec_command "${host}" "$(declare -f install_kube);install_kube $KUBE_VERSION"
-    if [ $? -ne 0 ]; then
-      log::err "[install]" "install kube on $host error."
-    else 
-      log::info "[install]" "install kube on $host succeeded."
-    fi
-    
+    check_exit_code "$?" "install" "install kube on $host"
   done
 
   local apiservers=$MASTER_NODES
@@ -763,14 +714,10 @@ function install_package() {
   
   for host in $WORKER_NODES
   do
-     # install haproxy
-     log::info "[install]" "install haproxy on $host"
-     exec_command "${host}" "$(declare -f install_haproxy);install_haproxy "$apiservers""
-     if [ $? -ne 0 ]; then
-       log::err "[install]" "install haproxy on $host error."
-     else 
-       log::info "[install]" "install haproxy on $host succeeded."
-     fi
+    # install haproxy
+    log::info "[install]" "install haproxy on $host"
+    exec_command "${host}" "$(declare -f install_haproxy);install_haproxy "$apiservers""
+    check_exit_code "$?" "install" "install haproxy on $host"
   done
 }
 
@@ -778,12 +725,15 @@ function install_package() {
 function command_exists() {
   # 检查命令是否存在
   
-  if command -V "$1" > /dev/null 2>&1; then
-      log::info "[check]" "$1 command exists."
+  local cmd=${1}
+  local package=${2}
+
+  if command -V "$cmd" > /dev/null 2>&1; then
+    log::info "[check]" "$cmd command exists."
   else
-      log::warning "[check]" "I require $1 but it's not installed."
-      yum -y install $2 > $LOG_FILE 2>&1
-      log::warning "[check]" "install $2 package."
+    log::warning "[check]" "I require $cmd but it's not installed."
+    log::warning "[check]" "install $package package."
+    yum -y install ${package} >> $LOG_FILE 2>&1
   fi
 }
 
@@ -799,23 +749,39 @@ function check_command() {
 
 function check_ssh_conn() {
   # 检查ssh连通性
-  
-  local conn_status=0
+
   for host in $MASTER_NODES $WORKER_NODES
   do
     [ "$host" == "127.0.0.1" ] && continue
     exec_command "${host}" "exit"
-    if [ $? != "0" ]; then
-      log::err "[check]" "ssh $host connection failed."
-      conn_status=1
-    else
-      log::info "[check]" "ssh $host connection succeeded."
-    fi
+    check_exit_code "$?" "check" "ssh $host connection" "exit"
   done
+}
 
-  if [ $conn_status != "0" ]; then
-    log::err "[check]" "Please keep the ssh connection open!"
-    exit $conn_status
+
+function check_apiserver() {
+  # 检查apiserver连通性
+
+  exec_command "${INIT_NODE}" "
+     kubectl get node
+  "
+  check_exit_code "$?" "check" "conn apiserver" "exit"
+}
+
+
+function check_exit_code() {
+  # 检查返回码
+
+  local code=${1:-}
+  local app=${2:-}
+  local desc=${3:-}
+  local exit_script=${4:-}
+
+  if [[ "x${code}" == "x0" ]]; then
+    log::info "[${app}]" "${desc} succeeded."
+  else
+    log::err "[${app}]" "${desc} failed."
+    [[ "x$exit_script" == "xexit" ]] && exit $code
   fi
 }
 
@@ -825,8 +791,13 @@ function check() {
   
   # check command
   check_command
+
   # check ssh conn
   check_ssh_conn
+
+  # check apiserver conn
+  [[ "x${RESET_TAG:-}" == "x1" || "x${ADD_TAG:-}" == "x1" || "x${DEL_TAG:-}" == "x1" ]] && check_apiserver  
+  
 }
 
 
@@ -868,6 +839,8 @@ $(for h in $MASTER_NODES;do echo "  - $h";done)
     readOnly: true
     pathType: File
 controllerManager:
+  extraArgs:
+    bind-address: 0.0.0.0
   extraVolumes:
   - hostPath: /etc/localtime
     mountPath: /etc/localtime
@@ -875,6 +848,8 @@ controllerManager:
     readOnly: true
     pathType: File
 scheduler:
+  extraArgs:
+    bind-address: 0.0.0.0
   extraVolumes:
   - hostPath: /etc/localtime
     mountPath: /etc/localtime
@@ -882,22 +857,13 @@ scheduler:
     readOnly: true
     pathType: File
 EOF
-"   
-  if [ $? -ne 0 ]; then
-    log::err "[kubeadm init]" "$INIT_NODE: set kubeadmcfg.yaml error."
-    exit 1
-  else 
-    log::info "[kubeadm init]" "$INIT_NODE: set kubeadmcfg.yaml succeeded."
-  fi
+"
+  check_exit_code "$?" "kubeadm init" "$INIT_NODE: set kubeadmcfg.yaml" "exit"
   
   log::info "[kubeadm init]" "$INIT_NODE: kubeadm init start."
   exec_command "${INIT_NODE}" "kubeadm init --config=/tmp/kubeadmcfg.yaml --upload-certs"
-  if [ $? -ne 0 ]; then
-    log::err "[kubeadm init]" "$INIT_NODE: kubeadm init error."
-    exit 1
-  else 
-    log::info "[kubeadm init]" "$INIT_NODE: kubeadm init succeeded."
-  fi
+  check_exit_code "$?" "kubeadm init" "$INIT_NODE: kubeadm init" "exit"
+  
   sleep 3
 
   log::info "[kubeadm init]" "$INIT_NODE: set kube config."
@@ -905,7 +871,12 @@ EOF
      mkdir -p $HOME/.kube
      sudo cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
   '
-  [ "$MASTER_NODES" == "127.0.0.1" ] && exec_command "127.0.0.1" "kubectl taint nodes --all node-role.kubernetes.io/master-"
+  check_exit_code "$?" "kubeadm init" "$INIT_NODE: set kube config"
+  if [[ "$MASTER_NODES" == "127.0.0.1" ]]; then
+    log::info "[kubeadm init]" "$INIT_NODE: delete master taint"
+    exec_command "127.0.0.1" "kubectl taint nodes --all node-role.kubernetes.io/master-"
+    check_exit_code "$?" "kubeadm init" "$INIT_NODE: delete master taint"
+  fi
 }
 
 
@@ -939,18 +910,15 @@ function join_cluster() {
     exec_command "${host}" "
       kubeadm join $KUBE_APISERVER:6443 --token $INIT_TOKEN --discovery-token-ca-cert-hash sha256:$CACRT_HASH --control-plane --certificate-key $INTI_CERTKEY
     "
-    if [ $? -ne 0 ]; then
-      log::err "[kubeadm join]" "master $host join cluster error."
-      exit 1
-    else 
-      log::info "[kubeadm join]" "master $host join cluster succeeded."
-    fi
+    check_exit_code "$?" "kubeadm join" "master $host join cluster" "exit"
 
-    log::info "[kubeadm init]" "$host: set kube config."
-    exec_command "${INIT_NODE}" '
-      mkdir -p $HOME/.kube
-      sudo cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
-    '
+    log::info "[kubeadm join]" "$host: set kube config."
+    exec_command "${host}" "
+      mkdir -p \$HOME/.kube
+      sudo cp -f /etc/kubernetes/admin.conf \$HOME/.kube/config
+    "
+    check_exit_code "$?" "kubeadm join" "$host: set kube config"
+    
     exec_command "${host}" "
       sed -i 's#$INIT_NODE $KUBE_APISERVER#127.0.0.1 $KUBE_APISERVER#g' /etc/hosts
     "
@@ -962,22 +930,33 @@ function join_cluster() {
     exec_command "${host}" "
       kubeadm join $KUBE_APISERVER:6443 --token $INIT_TOKEN --discovery-token-ca-cert-hash sha256:$CACRT_HASH
     "
-    if [ $? -ne 0 ]; then
-      log::err "[kubeadm join]" "worker $host join cluster error."
-      exit 1
-    else 
-      log::info "[kubeadm join]" "worker $host join cluster succeeded."
-    fi
+    check_exit_code "$?" "kubeadm join" "worker $host join cluster" "exit"
   
     log::info "[kubeadm join]" "set $host worker node role."
-    if [[ "x${ADD_TAG:-}" == "x1" ]]; then
-      kubectl get node -o wide | grep "$host" | awk '{print "kubectl label node "$1" node-role.kubernetes.io/worker= --overwrite" }' | bash >> $LOG_FILE 2>&1
-    else
-      exec_command "${INIT_NODE}" "
-        kubectl get node -o wide | grep "$host" | awk '{print \"kubectl label node \" \$1 \" node-role.kubernetes.io/worker= --overwrite\" }' | bash
-      "
-    fi
+    exec_command "${INIT_NODE}" "
+      kubectl get node -o wide | grep "$host" | awk '{print \"kubectl label node \" \$1 \" node-role.kubernetes.io/worker= --overwrite\" }' | bash
+    "
+    check_exit_code "$?" "kubeadm join" "set $host worker node role"
+    
   done
+}
+
+
+function kube_wait() {
+  # 等待pod完成
+
+  local app=$1
+  local namespace=$2
+  local selector=$3
+
+  log::info "[waiting]" "waiting $app"
+  exec_command "${INIT_NODE}" "
+    kubectl wait --namespace "$namespace" \
+    --for=condition=ready pod \
+    --selector=$selector \
+    --timeout=300s
+  "
+  check_exit_code "$?" "waiting" "$app pod ready"
 }
 
 
@@ -992,28 +971,28 @@ function kube_apply() {
     cat <<EOF | kubectl --validate=false apply -f -
 $(printf "%s" "$manifest")
 EOF
-  "  
-  if [ $? -ne 0 ]; then
-    log::err "[apply]" "add $file error."
-  else 
-    log::info "[apply]" "add $file succeeded."
-  fi
-   
+  "
+  check_exit_code "$?" "apply" "add $file"
 }
 
 
 function add_ingress() {
   # 添加ingress组件
 
+  local add_ingress_demo=0
+
   if [[ "$KUBE_INGRESS" == "nginx" ]]; then
-    log::info "[addon]" "download ingress-nginx manifests"
+    log::info "[ingress]" "download ingress-nginx manifests"
     wget https://cdn.jsdelivr.net/gh/kubernetes/ingress-nginx@controller-v${INGRESS_NGINX}/deploy/static/provider/baremetal/deploy.yaml -O ${TMP_DIR}/ingress-nginx.yml  >> $LOG_FILE 2>&1
     sed -i "s#k8s.gcr.io#k8sgcr.lework.workers.dev#g" ${TMP_DIR}/ingress-nginx.yml
     sed -i 's#$(POD_NAMESPACE)#\\$(POD_NAMESPACE)#g' ${TMP_DIR}/ingress-nginx.yml
     kube_apply "${TMP_DIR}/ingress-nginx.yml"
+    
+    kube_wait "ingress-nginx" "ingress-nginx" "app.kubernetes.io/component=controller"
+    add_ingress_demo=1
 
   elif [[ "$KUBE_INGRESS" == "traefik" ]]; then
-    log::info "[addon]" "download ingress-traefik manifests"
+    log::info "[ingress]" "download ingress-traefik manifests"
     kube_apply "traefik" """
 ---
 kind: ClusterRole
@@ -1121,10 +1100,17 @@ spec:
       name: admin
       targetPort: 8080
 """
+    kube_wait "traefik" "default" "app=traefik"
+    add_ingress_demo=1
+
+  else
+    log::warning "[ingress]" "No $KUBE_INGRESS config."
   fi
 
-  log::info "[ingress]" "add ingress app demo"
-  kube_apply "ingress-demo-app" """
+  if [[ "x$add_ingress_demo" == "x1" ]]; then
+    sleep 3
+    log::info "[ingress]" "add ingress app demo"
+    kube_apply "ingress-demo-app" """
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -1177,43 +1163,176 @@ spec:
           serviceName: ingress-demo-app
           servicePort: 80
 """
-   log::info "[ingress]" "access: curl -H 'Host:app.demo.com' [node_ip]:[node_port]"
+     log::info "[ingress]" "access: curl -H 'Host:app.demo.com' [node_ip]:[node_port]"
+  fi
 }
+
 
 function add_addon() {
-   # 添加addon组件
+  # 添加addon组件
 
-   if [[ "$KUBE_NETWORK" == "flannel" ]]; then
-     log::info "[addon]" "download flannel manifests"
-     wget https://cdn.jsdelivr.net/gh/coreos/flannel@v${FLANNEL_VERSION}/Documentation/kube-flannel.yml -O ${TMP_DIR}/kube-flannel.yml >> $LOG_FILE 2>&1
-     sed -i "s#10.244.0.0/16#$KUBE_POD_SUBNET#g" ${TMP_DIR}/kube-flannel.yml
-     kube_apply "${TMP_DIR}/kube-flannel.yml"
+  if [[ "$KUBE_NETWORK" == "flannel" ]]; then
+    log::info "[addon]" "download flannel manifests"
+    wget https://cdn.jsdelivr.net/gh/coreos/flannel@v${FLANNEL_VERSION}/Documentation/kube-flannel.yml -O ${TMP_DIR}/kube-flannel.yml >> $LOG_FILE 2>&1
+    sed -i "s#10.244.0.0/16#$KUBE_POD_SUBNET#g" ${TMP_DIR}/kube-flannel.yml
+    
+    kube_apply "${TMP_DIR}/kube-flannel.yml"
 
-   elif [[ "$KUBE_NETWORK" == "calico" ]]; then
-     log::info "[addon]" "download calico manifests"
-     exec_command "${INIT_NODE}" "
-       wget https://docs.projectcalico.org/manifests/calico.yaml -O /tmp/calico.yml
-       wget https://docs.projectcalico.org/manifests/calicoctl.yaml -O /tmp/calicoctl.yaml
-       sed -i "s#:v.*#:v${CALICO_VERSION}#g" /tmp/calico.yml
-       sed -i "s#:v.*#:v${CALICO_VERSION}#g" /tmp/calicoctl.yaml
-       kubectl apply -f /tmp/calico.yml
-       kubectl apply -f /tmp/calicoctl.yaml
-     "
-     if [ $? -ne 0 ]; then
-       log::err "[apply]" "add calico error."
-     else 
-       log::info "[apply]" "add calico succeeded."
-     fi
-   fi
+  elif [[ "$KUBE_NETWORK" == "calico" ]]; then
+    log::info "[addon]" "download calico manifests"
+    exec_command "${INIT_NODE}" "
+      wget https://docs.projectcalico.org/manifests/calico.yaml -O /tmp/calico.yml
+      wget https://docs.projectcalico.org/manifests/calicoctl.yaml -O /tmp/calicoctl.yaml
+      sed -i "s#:v.*#:v${CALICO_VERSION}#g" /tmp/calico.yml
+      sed -i "s#:v.*#:v${CALICO_VERSION}#g" /tmp/calicoctl.yaml
+      kubectl apply -f /tmp/calico.yml
+      kubectl apply -f /tmp/calicoctl.yaml
+    "
+    check_exit_code "$?" "apply" "add calico"
+  else
+    log::warning "[addon]" "No $KUBE_NETWORK config."
+  fi
 
-   log::info "[addon]" "download metrics-server manifests"
-   wget https://github.com/kubernetes-sigs/metrics-server/releases/download/v${METRICS_SERVER_VERSION}/components.yaml -O ${TMP_DIR}/metrics-server.yml  >> $LOG_FILE 2>&1
-   sed -i "s#k8s.gcr.io/metrics-server#$KUBE_IMAGE_REPO#g" ${TMP_DIR}/metrics-server.yml
-   sed -i '/--secure-port=4443/a\          - --kubelet-insecure-tls' ${TMP_DIR}/metrics-server.yml
-   sed -i '/--secure-port=4443/a\          - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname' ${TMP_DIR}/metrics-server.yml
-   kube_apply "${TMP_DIR}/metrics-server.yml"
-
+  log::info "[addon]" "download metrics-server manifests"
+  wget https://github.com/kubernetes-sigs/metrics-server/releases/download/v${METRICS_SERVER_VERSION}/components.yaml -O ${TMP_DIR}/metrics-server.yml  >> $LOG_FILE 2>&1
+  sed -i "s#k8s.gcr.io/metrics-server#$KUBE_IMAGE_REPO#g" ${TMP_DIR}/metrics-server.yml
+  sed -i '/--secure-port=4443/a\          - --kubelet-insecure-tls' ${TMP_DIR}/metrics-server.yml
+  sed -i '/--secure-port=4443/a\          - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname' ${TMP_DIR}/metrics-server.yml
+  kube_apply "${TMP_DIR}/metrics-server.yml"
 }
+
+
+function add_monitor() {
+  # 添加监控组件
+  
+  if [[ "$KUBE_MONITOR" == "prometheus" ]]; then
+    log::info "[monitor]" "download prometheus manifests"
+    exec_command "${INIT_NODE}" "
+      wget https://gh.lework.workers.dev/https://github.com/prometheus-operator/kube-prometheus/archive/v${KUBE_PROMETHEUS_VERSION}.zip -O /tmp/prometheus.zip
+      command -v unzip 2>/dev/null || yum install -y unzip
+      unzip -o /tmp/prometheus.zip -d /tmp/
+    "
+    check_exit_code "$?" "monitor" "download prometheus"
+   
+    log::info "[monitor]" "apply prometheus manifests"
+    exec_command "${INIT_NODE}" "
+      cd /tmp/kube-prometheus-${KUBE_PROMETHEUS_VERSION} \
+      && kubectl apply -f manifests/setup/ \
+      && until kubectl get servicemonitors --all-namespaces ; do date; sleep 1; echo ''; done \
+      && kubectl apply -f manifests/
+    "
+    check_exit_code "$?" "apply" "add prometheus"
+
+    log::info "[monitor]" "set controller-manager and scheduler prometheus discovery service"
+    exec_command "${INIT_NODE}" "
+      cat <<EOF | kubectl --validate=false apply -f -
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: kube-system
+  name: kube-scheduler-prometheus-discovery
+  labels:
+    k8s-app: kube-scheduler
+spec:
+  selector:
+    component: kube-scheduler
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: https-metrics
+    port: 10259
+    targetPort: 10259
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: kube-system
+  name: kube-controller-manager-prometheus-discovery
+  labels:
+    k8s-app: kube-controller-manager
+spec:
+  selector:
+    component: kube-controller-manager
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: https-metrics
+    port: 10257
+    targetPort: 10257
+    protocol: TCP
+EOF
+    "
+    check_exit_code "$?" "apply" "set controller-manager and scheduler prometheus discovery"
+
+    log::info "[monitor]" "add prometheus ingress"
+    exec_command "${INIT_NODE}" "
+      cat <<EOF | kubectl --validate=false apply -f -
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: grafana
+  namespace: monitoring
+  annotations:
+    kubernetes.io/ingress.class: ${KUBE_INGRESS}
+spec:
+  rules:
+  - host: grafana.monitoring.k8s.local
+    http:
+      paths:
+      - backend:
+          serviceName: grafana
+          servicePort: 3000
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: prometheus
+  namespace: monitoring
+  annotations:
+    kubernetes.io/ingress.class: ${KUBE_INGRESS}
+spec:
+  rules:
+  - host: prometheus.monitoring.k8s.local
+    http:
+      paths:
+      - backend:
+          serviceName: prometheus-k8s
+          servicePort: 9090
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: alertmanager
+  namespace: monitoring
+  annotations:
+    kubernetes.io/ingress.class: ${KUBE_INGRESS}
+spec:
+  rules:
+  - host: alertmanager.monitoring.k8s.local
+    http:
+      paths:
+      - backend:
+          serviceName: alertmanager-main
+          servicePort: 9093
+EOF
+    "
+    local s="$?"
+    check_exit_code "$s" "apply" "add prometheus ingress"
+    
+    if [[ "$s" == "0" ]]; then
+      log::info "[apply]" "access: grafana.monitoring.k8s.local"
+      log::info "[apply]" "access: prometheus.monitoring.k8s.local"
+      log::info "[apply]" "access: alertmanager.monitoring.k8s.local"
+    fi
+    
+  else
+    log::warning "[addon]" "No $KUBE_MONITOR config."
+  fi
+}
+
 
 function kube_ops() {
    # 运维操作
@@ -1267,49 +1386,52 @@ spec:
 """
 }
 
+
 function kube_status() {
   # 集群状态
   
   sleep 5
   log::info "[cluster]" "cluster status"
   sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${INIT_NODE} -p ${SSH_PORT} "
-     kubectl get node
+     echo
+     kubectl get node -o wide
+     echo
      kubectl -n kube-system get pods
-  " | tee -a $LOG_FILE
+  " 2>> $LOG_FILE | tee -a $LOG_FILE
 
 }
 
 
 function reset_node() {
-  # 重置命令
-  
-  kubeadm reset -f || echo 0
-  systemctl stop kubelet
-  [ -f /etc/haproxy/haproxy.cfg ] && systemctl stop haproxy
-  sed -i -e "/$KUBE_APISERVER/d" -e '/-worker-/d' -e '/-master-/d' /etc/hosts
-  iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X
-  [ -d /var/lib/kubelet ] && find /var/lib/kubelet | xargs -n 1 findmnt -n -t tmpfs -o TARGET -T | uniq | xargs -r umount -v
-  rm -rf /etc/kubernetes/* /var/lib/etcd/* $HOME/.kube /etc/cni/net.d/*
-  docker rm -f -v $(docker ps | grep kube | awk '{print $1}') || echo 0
-  systemctl restart docker
-  ipvsadm --clear || echo 0
-  ip link delete flannel.1 || echo 0
-  ip link delete cni0 || echo 0
+  # 重置节点
+
+  local host=$1
+  log::info "[reset]" "node $host"
+  exec_command "${host}" "
+    kubeadm reset -f || echo 0
+    systemctl stop kubelet
+    [ -f /etc/haproxy/haproxy.cfg ] && systemctl stop haproxy
+    sed -i -e \"/$KUBE_APISERVER/d\" -e '/-worker-/d' -e '/-master-/d' /etc/hosts
+    iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X
+    [ -d /var/lib/kubelet ] && find /var/lib/kubelet | xargs -n 1 findmnt -n -t tmpfs -o TARGET -T | uniq | xargs -r umount -v
+    rm -rf /etc/kubernetes/* /var/lib/etcd/* \$HOME/.kube /etc/cni/net.d/*
+    docker rm -f -v \$(docker ps | grep kube | awk '{print \$1}') || echo 0
+    systemctl restart docker
+    ipvsadm --clear || echo 0
+    ip link delete flannel.1 || echo 0
+    ip link delete cni0 || echo 0
+    ip link delete tunl0 || echo 0
+  "
+  check_exit_code "$?" "reset" "$host: reset"
 }
 
 
 function reset_all() {
-  # 重置集群
+  # 重置所有节点
   
   for host in $MASTER_NODES $WORKER_NODES
   do
-     log::info "[reset]" "node $host"
-     exec_command "${host}" "$(declare -f reset_node);reset_node"
-     if [ $? -ne 0 ]; then
-       log::err "[reset]" "$host: reset error."
-     else 
-       log::info "[reset]" "$host: reset succeeded."
-     fi
+    reset_node "$host"
   done
 
 }
@@ -1320,21 +1442,21 @@ function start_init() {
   
   INIT_NODE=$(echo $MASTER_NODES | awk '{print $1}')
 
-  # 1. 预检测
-  check
-  # 2. 初始化集群
+  # 1. 初始化集群
   init
-  # 3. 安装包
+  # 2. 安装包
   install_package
-  # 4. 加载提供的文件
-  # 5. 初始化kubeadm
+  # 3. 加载提供的文件
+  # 4. 初始化kubeadm
   kubeadm_init
-  # 6. 加入集群
+  # 5. 加入集群
   join_cluster
-  # 7. 安装addon
+  # 6. 安装addon
   add_addon
-  # 8. 添加ingress
+  # 7. 添加ingress
   add_ingress
+  # 8. 添加monitor
+  [[ "x${MONITOR_TAG:-}" == "x1" ]] && add_monitor
   # 9. 运维操作
   kube_ops
   # 10. 查看集群状态
@@ -1345,15 +1467,13 @@ function start_init() {
 function add_node() {
   # 添加节点
   
-  # 1. 预检测
-  check
-  # 2. 初始化集群
+  # 1. 初始化节点
   init_add_node
-  # 3. 安装包
+  # 2. 安装包
   install_package
-  # 4. 加入集群
+  # 3. 加入集群
   join_cluster
-  # 5. 查看集群状态
+  # 4. 查看集群状态
   kube_status
 }
 
@@ -1365,25 +1485,22 @@ function del_node() {
   do
     log::info "[del]" "node $host"
     local node_name=$(kubectl get node -o wide | grep $host | awk '{print $1}')
+    if [[ "$node_name" == "" ]]; then
+      log::err "[del]" "node $host not found."
+      continue
+    fi
 
     log::info "[del]" "drain $host"
-    kubectl drain $node_name --force --ignore-daemonsets --delete-local-data >> $LOG_FILE 2>&1
-    if [ $? -ne 0 ]; then
-      log::err "[del]" "$host: drain error."
-    else 
-      log::info "[del]" "$host: drain succeeded."
-    fi
+    exec_command "127.0.0.1" "kubectl drain $node_name --force --ignore-daemonsets --delete-local-data"
+    check_exit_code "$?" "del" "$host: drain"
 
     log::info "[del]" "delete node $host"
-    kubectl delete node $node_name >> $LOG_FILE 2>&1
-    if [ $? -ne 0 ]; then
-      log::err "[del]" "$host: delete error."
-    else 
-      log::info "[del]" "$host: delete succeeded."
-    fi
-  done
+    exec_command "127.0.0.1" "kubectl delete node $node_name"
+    check_exit_code "$?" "del" "$host: delete"
 
-  reset_all
+    sleep 3
+    reset_node "$host"
+  done
 
   kube_status
 }
@@ -1414,6 +1531,7 @@ Flag:
   -v,--version    kube version, default: ${KUBE_VERSION}
   -n,--network    cluster network, choose: [flannel,calico], default: ${KUBE_NETWORK}
   -i,--ingress    ingress controller, choose: [nginx,traefik], default: ${KUBE_INGRESS}
+  -M,--monitor    cluster monitor, choose: [prometheus]
 
 Example:
   [cluster node]
@@ -1447,8 +1565,12 @@ Example:
   --master 192.168.77.140,192.168.77.141 \\
   --worker 192.168.77.143,192.168.77.144 \\
   --user root \\
-  --password 123456 \\
-  --version 1.19.2
+  --password 123456
+ 
+  [other]
+  $0 add --monitor prometheus
+  $0 add --ingress traefik
+
 EOF
   exit 1
 }
@@ -1472,33 +1594,33 @@ while [ "${1:-}" != "" ]; do
     del )                   DEL_TAG=1
                             ;;
     -m | --master )         shift
-                            unset MASTER_NODES
-                            MASTER_NODES=$(echo $1 | tr ',' ' ')
+                            MASTER_NODES=$(echo ${1:$MASTER_NODES} | tr ',' ' ')
                             ;;
     -w | --worker )         shift
-                            unset WORKER_NODES
-                            WORKER_NODES=$(echo $1 | tr ',' ' ')
+                            WORKER_NODES=$(echo ${1:-$WORKER_NODES} | tr ',' ' ')
                             ;;
     -u | --user )           shift
-                            SSH_USER=$1
+                            SSH_USER=${1:-$SSH_USER}
                             ;;
     -p | --password )       shift
-                            SSH_PASSWORD=$1
+                            SSH_PASSWORD=${1:-$SSH_PASSWORD}
                             ;;
     -P | --port )           shift
-                            SSH_PORT=$1
+                            SSH_PORT=${1:-$SSH_PORT}
                             ;;
     -v | --version )        shift
-                            unset KUBE_VERSION
-                            KUBE_VERSION=$1
+                            KUBE_VERSION=${1:-$KUBE_VERSION}
                             ;;
     -n | --network )        shift
-                            unset KUBE_NETWORK
-                            KUBE_NETWORK=$1
+                            KUBE_NETWORK=${1:-$KUBE_NETWORK}
                             ;;
     -i | --ingress )        shift
-                            unset KUBE_INGRESS
-                            KUBE_INGRESS=$1
+                            INGRESS_TAG=1
+                            KUBE_INGRESS=${1:-$KUBE_INGRESS}
+                            ;;
+    -M | --monitor )        shift
+                            MONITOR_TAG=1
+                            KUBE_MONITOR=${1:-$KUBE_MONITOR}
                             ;;
     * )                     usage
                             exit 1
@@ -1506,6 +1628,9 @@ while [ "${1:-}" != "" ]; do
   shift
 done
 
+
+# 预检
+check
 
 # 启动
 if [[ "x${RESET_TAG:-}" == "x1" ]]; then
@@ -1515,17 +1640,12 @@ elif [[ "x${INIT_TAG:-}" == "x1" ]]; then
   [[ "$MASTER_NODES" == "" ]] && MASTER_NODES="127.0.0.1"
   start_init
 elif [[ "x${ADD_TAG:-}" == "x1" ]]; then
-  if [[ "$MASTER_NODES" == "" && "$WORKER_NODES" == "" ]]; then
-    [[ "x${KUBE_INGRESS}" != "x" ]] && add_ingress || usage
-  else
-    add_node
-  fi
+  [[ "x${INGRESS_TAG:-}" == "x1" ]] && { add_ingress; add=1; }
+  [[ "x${MONITOR_TAG:-}" == "x1" ]] && { add_monitor; add=1; }
+  [[ "$MASTER_NODES" != "" || "$WORKER_NODES" != "" ]] && { add_node; add=1; }
+  [[ "${add:-}" != "1" ]] && usage
 elif [[ "x${DEL_TAG:-}" == "x1" ]]; then
-  if [[ "$MASTER_NODES" == "" && "$WORKER_NODES" == "" ]]; then
-    usage
-  else
-    del_node
-  fi
+  [[ "$MASTER_NODES" != "" || "$WORKER_NODES" != "" ]] && del_node || usage
 else
   usage
 fi

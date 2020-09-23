@@ -3,7 +3,7 @@
 
 
 
-## Why
+## 为什么？
 
 **为什么要搞这个？ansible playbook 不好么？**
 
@@ -11,7 +11,7 @@
 
 
 
-## Require
+## 要求
 
 OS: `centos 7.x`
 
@@ -23,7 +23,7 @@ MEM: `2G`
 
 
 
-## Architecture
+## 架构
 
 
 
@@ -33,7 +33,17 @@ MEM: `2G`
 
 
 
-## Usage
+## 功能
+
+- 服务器初始化。
+- 安装`kube`组件。
+- 初始化`kubernetes`集群。
+- 安装`ingress`组件，可选`nginx`，`traefik`。
+- 安装`network`组件，可选`flannel`，`calico`， 需在初始化时指定。
+- 安装`monitor`组件，可选`prometheus`。
+- 添加运维操作，如备份etcd快照。
+
+## 使用
 
 ### 下载脚本
 
@@ -66,6 +76,7 @@ Flag:
   -v,--version    kube version, default: latest
   -n,--network    cluster network, choose: [flannel,calico], default: flannel
   -i,--ingress    ingress controller, choose: [nginx,traefik], default: nginx
+  -M,--monitor    cluster monitor, choose: [prometheus]
 
 Example:
   [cluster node]
@@ -99,8 +110,11 @@ Example:
   --master 192.168.77.140,192.168.77.141 \
   --worker 192.168.77.143,192.168.77.144 \
   --user root \
-  --password 123456 \
-  --version 1.19.2
+  --password 123456
+ 
+  [other]
+  kainstall.sh add --monitor prometheus
+  kainstall.sh add --ingress traefik
 
 
   See detailed log >>> /tmp/kainstall.RBfHgbjYUG/kainstall.log 
