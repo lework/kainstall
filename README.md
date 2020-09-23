@@ -149,7 +149,7 @@ bash kainstall.sh add --worker 192.168.77.134
 bash kainstall.sh add --master 192.168.77.135,192.168.77.136 --worker 192.168.77.137,192.168.77.138
 ```
 
-### 添加ingres
+### 添加ingress
 
 > 操作需在 k8s master 节点上操作，ssh连接信息非默认时请指定
 
@@ -158,20 +158,18 @@ bash kainstall.sh add --master 192.168.77.135,192.168.77.136 --worker 192.168.77
 bash kainstall.sh add --ingress nginx
 ```
 
-
-
 ### 删除节点
 
 > 操作需在 k8s master 节点上操作，ssh连接信息非默认时请指定
 ```bash
 # 删除单个master节点
-bash kainstall.sh add --master 192.168.77.135
+bash kainstall.sh del --master 192.168.77.135
 
 # 删除单个worker节点
-bash kainstall.sh add --worker 192.168.77.134
+bash kainstall.sh del --worker 192.168.77.134
 
 # 同时删除
-bash kainstall.sh add --master 192.168.77.135,192.168.77.136 --worker 192.168.77.137,192.168.77.138
+bash kainstall.sh del --master 192.168.77.135,192.168.77.136 --worker 192.168.77.137,192.168.77.138
 ```
 
 ### 重置集群
