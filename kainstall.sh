@@ -2,7 +2,7 @@
 ###################################################################
 #Script Name	: kainstall.sh
 #Description	: Install kubernetes cluster using kubeadm.
-#Update Date    : 2020-09-18
+#Update Date    : 2020-09-25
 #Author       	: lework
 #Email         	: lework@yeah.net
 ###################################################################
@@ -23,9 +23,11 @@ KUBE_VERSION="latest"
 FLANNEL_VERSION="0.12.0"
 METRICS_SERVER_VERSION="0.3.7"
 INGRESS_NGINX="0.35.0"
-TRAEFIK_VERSION="2.2.11"
+TRAEFIK_VERSION="2.3.0"
 CALICO_VERSION="3.16.1"
 KUBE_PROMETHEUS_VERSION="0.6.0"
+ELASTICSEARCH_VERSION="7.9.2"
+ROOK_VERSION="1.3.11"
  
 # 集群配置
 KUBE_APISERVER="apiserver.cluster.local"
@@ -35,6 +37,8 @@ KUBE_IMAGE_REPO="registry.aliyuncs.com/k8sxio"
 KUBE_NETWORK="flannel"
 KUBE_INGRESS="nginx"
 KUBE_MONITOR="prometheus"
+KUBE_STORAGE="rook"
+KUBE_LOG="elasticsearch"
 
 # 定义的master和worker节点地址，以逗号分隔
 MASTER_NODES=""
@@ -55,16 +59,21 @@ HOSTNAME_PREFIX="k8s"
 TMP_DIR="$(mktemp -d -t kainstall.XXXXXXXXXX)"
 LOG_FILE="${TMP_DIR}/kainstall.log"
 SSH_OPTIONS="-o ConnectTimeout=600 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+ERROR_INFO="\n\033[31mERROR Summary: \033[0m\n  "
+ACCESS_INFO="\n\033[32mACCESS Summary: \033[0m\n  "
+COMMAND_OUTPUT=""
 
 
-trap 'echo -e "\n\n  See detailed log >>> $LOG_FILE \n\n";exit' 1 2 3 15 EXIT
+trap 'printf "$ERROR_INFO$ACCESS_INFO"; echo -e "\n\n  See detailed log >>> $LOG_FILE \n\n";exit' 1 2 3 15 EXIT
 
 ######################################################################################################
 # function
 ######################################################################################################
 
 function log::err() {
-  printf "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[31mERROR:   \033[0m$*\n" | tee -a $LOG_FILE
+  local item="[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[31mERROR:   \033[0m$*\n"
+  ERROR_INFO="${ERROR_INFO}${item}"
+  printf "${item}" | tee -a $LOG_FILE
 }
 
 function log::info() {
@@ -73,6 +82,10 @@ function log::info() {
 
 function log::warning() {
   printf "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[33mWARNING: \033[0m$*\n" | tee -a $LOG_FILE
+}
+
+function log::access() {
+  ACCESS_INFO="${ACCESS_INFO}$*\n  "
 }
 
 
@@ -86,12 +99,12 @@ function exec_command() {
   if [[ "x${host}" == "x127.0.0.1" ]]; then
     # 本地执行
     echo "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: INFO: [exec] \"${command}\"" >> $LOG_FILE
-    bash -c "${command}" >> $LOG_FILE 2>&1
+    COMMAND_OUTPUT=$(bash -c "${command}" 2>> $LOG_FILE | tee -a $LOG_FILE)
     local status=$?
   else
     # 远程执行
     echo "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: INFO: [exec] sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${host}:${SSH_PORT} \"${command}\"" >> $LOG_FILE
-    sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} "${command}" >> $LOG_FILE 2>&1
+    COMMAND_OUTPUT=$(sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} "${command}" 2>> $LOG_FILE | tee -a $LOG_FILE)
     local status=$?
   fi
   return $status
@@ -372,7 +385,7 @@ Storage=persistent
 Compress=yes
 SyncIntervalSec=5m
 RateLimitInterval=30s
-RateLimitBurst= 1000
+RateLimitBurst=1000
 # 最大占用空间 10G
 SystemMaxUse=10G
 # 单日志文件最大 200M
@@ -500,16 +513,32 @@ function init() {
 function init_add_node() {
   # 初始化添加的节点
   
-  local index=$(kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{ $.items[*].metadata.name }' | grep -Eo '[0-9]+$')
+  local index=0
+  exec_command "${INIT_NODE}" "
+    kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
+  "
+  [[ "$?" == "0" ]] && index="${COMMAND_OUTPUT}"
+    
   index=$(( index + 1 ))
   
-  local node_hosts=$(kubectl get node -o jsonpath='{range.items[*]}{ .status.addresses[?(@.type=="InternalIP")].address } {.metadata.name }\n{end}')
+  exec_command "${INIT_NODE}" "
+    kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {.metadata.name }\\n{end}'
+  "
+  [[ "$?" == "0" ]] && local node_hosts="${COMMAND_OUTPUT}"
   
-  INIT_NODE=$(kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{range.items[*]}{ .status.addresses[?(@.type=="InternalIP")].address } {end}' | awk '{print $1}')
+  exec_command "${INIT_NODE}" "
+    kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address } {end}' | awk '{print \$1}'
+  "
+  [[ "$?" == "0" ]] && INIT_NODE="${COMMAND_OUTPUT}"
 
   # master节点
   for host in $MASTER_NODES
   do
+    if [[ $node_hosts == *"$host"* ]]; then
+      log::err "[init]" "The host $host is already in the cluster!"
+      exit 1
+    fi
+
     log::info "[init]" "master: $host"
     exec_command "${host}" "$(declare -f init_node); init_node"
     check_exit_code "$?" "init" "init master $host"
@@ -518,7 +547,7 @@ function init_add_node() {
     exec_command "${host}" "
       echo "$INIT_NODE $KUBE_APISERVER" >> /etc/hosts
       printf "\"$node_hosts\"" >> /etc/hosts
-      echo "${host} ${HOSTNAME_PREFIX}-master-node${index}" >> /etc/hosts
+      echo "${host:-} ${HOSTNAME_PREFIX}-master-node${index}" >> /etc/hosts
       hostnamectl set-hostname ${HOSTNAME_PREFIX}-master-node${index}
     "
     check_exit_code "$?" "init" "$host set hostname and resolve"
@@ -526,10 +555,19 @@ function init_add_node() {
   done
    
   # worker 节点
-  local index=$(kubectl get node --selector='!node-role.kubernetes.io/master' -o jsonpath='{ $.items[*].metadata.name }' | grep -Eo '[0-9]+$')
+  index=0
+  exec_command "${INIT_NODE}" "
+    kubectl get node --selector='!node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
+  "
+  [[ "$?" == "0" ]] && index="${COMMAND_OUTPUT}"
+  
   index=$(( index + 1 ))
   for host in $WORKER_NODES
   do
+    if [[ $node_hosts == *"$host"* ]]; then
+      log::err "[init]" "The host $host is already in the cluster!"
+      exit 1
+    fi
     log::info "[init]" "worker: $host"
     exec_command "${host}" "$(declare -f init_node); init_node"
     check_exit_code "$?" "init" "init worker $host"
@@ -585,8 +623,8 @@ EOF
   "data-root": "/var/lib/docker",
   "log-driver": "json-file",
   "log-opts": {
-    "max-size": "100m",
-    "max-file": "3"
+    "max-size": "200m",
+    "max-file": "5"
   },
   "default-ulimits": {
     "nofile": {
@@ -655,6 +693,7 @@ cat << EOF > /etc/haproxy/haproxy.cfg
 global
   log 127.0.0.1 local0
   log 127.0.0.1 local1 notice
+  log /dev/log local0 info
   tune.ssl.default-dh-param 2048
 
 defaults
@@ -709,7 +748,10 @@ function install_package() {
 
   local apiservers=$MASTER_NODES
   if [[ "x${ADD_TAG:-}" == "x1" ]]; then
-    apiservers=$(kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{ $.items[*].status.addresses[?(@.type=="InternalIP")].address }')
+    exec_command "${INIT_NODE}" "
+      kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{$.items[*].status.addresses[?(@.type==\"InternalIP\")].address}'
+    "
+    [[ "$?" == "0" ]] && apiservers="${COMMAND_OUTPUT}"
   fi
   
   for host in $WORKER_NODES
@@ -883,34 +925,32 @@ EOF
 function join_cluster() {
   # 加入集群
 
-  if [[ "x${ADD_TAG:-}" == "x1" ]]; then
-    log::info "[kubeadm join]" "master: get CACRT_HASH"
-    CACRT_HASH=$(openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //' 2>> $LOG_FILE)
-
-    log::info "[kubeadm join]" "master: get INTI_CERTKEY"
-    INTI_CERTKEY=$(kubeadm init phase upload-certs --upload-certs 2>> $LOG_FILE | tail -1 2>> $LOG_FILE)
+  log::info "[kubeadm join]" "master: get CACRT_HASH"
+  exec_command "${INIT_NODE}" "
+    openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //'
+  "
+  [[ "$?" == "0" ]] && CACRT_HASH="${COMMAND_OUTPUT}"
   
-    log::info "[kubeadm join]" "master: get INIT_TOKEN"
-    INIT_TOKEN=$(kubeadm token create 2>>$LOG_FILE)
-  else
-    log::info "[kubeadm join]" "$host: get CACRT_HASH"
-    CACRT_HASH=$(sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${INIT_NODE} -p ${SSH_PORT} "openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //'" 2>> $LOG_FILE)
-
-    log::info "[kubeadm join]" "$host: get INTI_CERTKEY"
-    INTI_CERTKEY=$(sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${INIT_NODE} -p ${SSH_PORT} "kubeadm init phase upload-certs --upload-certs | tail -1" 2>> $LOG_FILE)
-    
-    log::info "[kubeadm join]" "$host: get INIT_TOKEN"
-    INIT_TOKEN=$(sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${INIT_NODE} -p ${SSH_PORT} "kubeadm token list | grep bootstrappers | awk '{print \$1}'" 2>> $LOG_FILE)
-  fi
+  log::info "[kubeadm join]" "master: get INTI_CERTKEY"
+  exec_command "${INIT_NODE}" "
+    kubeadm init phase upload-certs --upload-certs 2>> $LOG_FILE | tail -1
+  "
+  [[ "$?" == "0" ]] && INTI_CERTKEY="${COMMAND_OUTPUT}"
+  
+  log::info "[kubeadm join]" "master: get INIT_TOKEN"
+  exec_command "${INIT_NODE}" "
+    kubeadm token create
+  "
+  [[ "$?" == "0" ]] && INIT_TOKEN="${COMMAND_OUTPUT}"
   
   for host in $MASTER_NODES
   do
     [[ "$INIT_NODE" == "$host" ]] && continue
     log::info "[kubeadm join]" "master $host join cluster."
     exec_command "${host}" "
-      kubeadm join $KUBE_APISERVER:6443 --token $INIT_TOKEN --discovery-token-ca-cert-hash sha256:$CACRT_HASH --control-plane --certificate-key $INTI_CERTKEY
+      kubeadm join $KUBE_APISERVER:6443 --token ${INIT_TOKEN:-} --discovery-token-ca-cert-hash sha256:${CACRT_HASH:-} --control-plane --certificate-key ${INTI_CERTKEY:-}
     "
-    check_exit_code "$?" "kubeadm join" "master $host join cluster" "exit"
+    check_exit_code "$?" "kubeadm join" "master $host join cluster"
 
     log::info "[kubeadm join]" "$host: set kube config."
     exec_command "${host}" "
@@ -928,9 +968,10 @@ function join_cluster() {
   do
     log::info "[kubeadm join]" "worker $host join cluster."
     exec_command "${host}" "
-      kubeadm join $KUBE_APISERVER:6443 --token $INIT_TOKEN --discovery-token-ca-cert-hash sha256:$CACRT_HASH
+      mkdir -p /etc/kubernetes/manifests
+      kubeadm join $KUBE_APISERVER:6443 --token ${INIT_TOKEN:-} --discovery-token-ca-cert-hash sha256:${CACRT_HASH:-}
     "
-    check_exit_code "$?" "kubeadm join" "worker $host join cluster" "exit"
+    check_exit_code "$?" "kubeadm join" "worker $host join cluster"
   
     log::info "[kubeadm join]" "set $host worker node role."
     exec_command "${INIT_NODE}" "
@@ -976,6 +1017,24 @@ EOF
 }
 
 
+function get_ingress_conn(){
+  # 获取ingress连接地址
+
+  exec_command "${INIT_NODE}" "
+    kubectl get node --selector='node-role.kubernetes.io/worker' -o jsonpath='{range.items[*]}{ .status.addresses[?(@.type==\"InternalIP\")].address } {end}' | awk '{print \$1}'
+  "
+  [[ "$?" == "0" ]] && local node_ip="${COMMAND_OUTPUT}"
+
+  exec_command "${INIT_NODE}" "
+    kubectl get svc --all-namespaces -o go-template=\"{{range .items}}{{if eq .metadata.name \\\"ingress-${KUBE_INGRESS}-controller\\\"}}{{range.spec.ports}}{{if eq .port 80}}{{.nodePort}}{{end}}{{end}}{{end}}{{end}}\"
+  "
+  [[ "$?" == "0" ]] && local node_port="${COMMAND_OUTPUT}"
+  
+  echo "${node_ip:-nodeIP}:${node_port:-nodePort}"
+
+}
+
+
 function add_ingress() {
   # 添加ingress组件
 
@@ -998,7 +1057,7 @@ function add_ingress() {
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1beta1
 metadata:
-  name: traefik-ingress-controller
+  name: ingress-traefik-controller
 rules:
   - apiGroups:
       - ''
@@ -1031,41 +1090,41 @@ rules:
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1beta1
 metadata:
-  name: traefik-ingress-controller
+  name: ingress-traefik-controller
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: traefik-ingress-controller
+  name: ingress-traefik-controller
 subjects:
   - kind: ServiceAccount
-    name: traefik-ingress-controller
+    name: ingress-traefik-controller
     namespace: default
     
 --- 
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: traefik-ingress-controller
+  name: ingress-traefik-controller
 
 ---
 kind: Deployment
 apiVersion: apps/v1
 metadata:
-  name: traefik
+  name: ingress-traefik-controller
   labels:
-    app: traefik
+    app: ingress-traefik-controller
 
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: traefik
+      app: ingress-traefik-controller
   template:
     metadata:
       labels:
-        app: traefik
+        app: ingress-traefik-controller
     spec:
-      serviceAccountName: traefik-ingress-controller
+      serviceAccountName: ingress-traefik-controller
       containers:
         - name: traefik
           image: traefik:v${TRAEFIK_VERSION}
@@ -1085,11 +1144,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: traefik
+  name: ingress-traefik-controller
 spec:
   type: NodePort
   selector:
-    app: traefik
+    app: ingress-traefik-controller
   ports:
     - protocol: TCP
       port: 80
@@ -1100,7 +1159,7 @@ spec:
       name: admin
       targetPort: 8080
 """
-    kube_wait "traefik" "default" "app=traefik"
+    kube_wait "traefik" "default" "app=ingress-traefik-controller"
     add_ingress_demo=1
 
   else
@@ -1139,12 +1198,13 @@ kind: Service
 metadata:
   name: ingress-demo-app
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app: ingress-demo-app
   ports:
     - name: http
       port: 80
+      targetPort: 80
 
 ---
 apiVersion: networking.k8s.io/v1beta1
@@ -1163,23 +1223,24 @@ spec:
           serviceName: ingress-demo-app
           servicePort: 80
 """
-     log::info "[ingress]" "access: curl -H 'Host:app.demo.com' [node_ip]:[node_port]"
+     local conn=$(get_ingress_conn)
+     log::access "[ingress]" "curl -H 'Host:app.demo.com' ${conn}"
   fi
 }
 
 
-function add_addon() {
-  # 添加addon组件
+function add_network() {
+  # 添加network组件
 
   if [[ "$KUBE_NETWORK" == "flannel" ]]; then
-    log::info "[addon]" "download flannel manifests"
+    log::info "[network]" "download flannel manifests"
     wget https://cdn.jsdelivr.net/gh/coreos/flannel@v${FLANNEL_VERSION}/Documentation/kube-flannel.yml -O ${TMP_DIR}/kube-flannel.yml >> $LOG_FILE 2>&1
     sed -i "s#10.244.0.0/16#$KUBE_POD_SUBNET#g" ${TMP_DIR}/kube-flannel.yml
     
     kube_apply "${TMP_DIR}/kube-flannel.yml"
 
   elif [[ "$KUBE_NETWORK" == "calico" ]]; then
-    log::info "[addon]" "download calico manifests"
+    log::info "[network]" "download calico manifests"
     exec_command "${INIT_NODE}" "
       wget https://docs.projectcalico.org/manifests/calico.yaml -O /tmp/calico.yml
       wget https://docs.projectcalico.org/manifests/calicoctl.yaml -O /tmp/calicoctl.yaml
@@ -1190,8 +1251,13 @@ function add_addon() {
     "
     check_exit_code "$?" "apply" "add calico"
   else
-    log::warning "[addon]" "No $KUBE_NETWORK config."
+    log::warning "[network]" "No $KUBE_NETWORK config."
   fi
+}
+
+
+function add_addon() {
+  # 添加addon组件
 
   log::info "[addon]" "download metrics-server manifests"
   wget https://github.com/kubernetes-sigs/metrics-server/releases/download/v${METRICS_SERVER_VERSION}/components.yaml -O ${TMP_DIR}/metrics-server.yml  >> $LOG_FILE 2>&1
@@ -1200,6 +1266,7 @@ function add_addon() {
   sed -i '/--secure-port=4443/a\          - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname' ${TMP_DIR}/metrics-server.yml
   kube_apply "${TMP_DIR}/metrics-server.yml"
 }
+
 
 
 function add_monitor() {
@@ -1279,7 +1346,7 @@ metadata:
     kubernetes.io/ingress.class: ${KUBE_INGRESS}
 spec:
   rules:
-  - host: grafana.monitoring.k8s.local
+  - host: grafana.monitoring.cluster.local
     http:
       paths:
       - backend:
@@ -1295,7 +1362,7 @@ metadata:
     kubernetes.io/ingress.class: ${KUBE_INGRESS}
 spec:
   rules:
-  - host: prometheus.monitoring.k8s.local
+  - host: prometheus.monitoring.cluster.local
     http:
       paths:
       - backend:
@@ -1311,7 +1378,7 @@ metadata:
     kubernetes.io/ingress.class: ${KUBE_INGRESS}
 spec:
   rules:
-  - host: alertmanager.monitoring.k8s.local
+  - host: alertmanager.monitoring.cluster.local
     http:
       paths:
       - backend:
@@ -1323,13 +1390,336 @@ EOF
     check_exit_code "$s" "apply" "add prometheus ingress"
     
     if [[ "$s" == "0" ]]; then
-      log::info "[apply]" "access: grafana.monitoring.k8s.local"
-      log::info "[apply]" "access: prometheus.monitoring.k8s.local"
-      log::info "[apply]" "access: alertmanager.monitoring.k8s.local"
+      local conn=$(get_ingress_conn)
+      log::access "[ingress]" "curl -H 'Host:grafana.monitoring.cluster.local' ${conn}"
+      log::access "[ingress]" "curl -H 'Host:prometheus.monitoring.cluster.local' ${conn}"
+      log::access "[ingress]" "curl -H 'Host:alertmanager.monitoring.cluster.local' ${conn}"
     fi
     
   else
     log::warning "[addon]" "No $KUBE_MONITOR config."
+  fi
+}
+
+
+function add_log() {
+  # 添加log组件
+
+  if [[ "$KUBE_LOG" == "elasticsearch" ]]; then
+    log::info "[log]" "add elasticsearch"
+    exec_command "${INIT_NODE}" """
+      cat <<EOF | kubectl apply -f -
+---
+kind: Namespace
+apiVersion: v1
+metadata:
+  name: kube-logging
+  
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: elasticsearch
+  namespace: kube-logging
+  labels:
+    app: elasticsearch
+spec:
+  selector:
+    app: elasticsearch
+  clusterIP: None
+  ports:
+    - port: 9200
+      name: rest
+    - port: 9300
+      name: inter-node
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: es-cluster
+  namespace: kube-logging
+spec:
+  serviceName: elasticsearch
+  replicas: 3
+  selector:
+    matchLabels:
+      app: elasticsearch
+  template:
+    metadata:
+      labels:
+        app: elasticsearch
+    spec:
+      containers:
+      - name: elasticsearch
+        image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTICSEARCH_VERSION}
+        resources:
+            limits:
+              cpu: 1000m
+            requests:
+              cpu: 100m
+        ports:
+        - containerPort: 9200
+          name: rest
+          protocol: TCP
+        - containerPort: 9300
+          name: inter-node
+          protocol: TCP
+        volumeMounts:
+        - name: data
+          mountPath: /usr/share/elasticsearch/data
+        env:
+          - name: cluster.name
+            value: k8s-logs
+          - name: node.name
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: discovery.seed_hosts
+            value: 'es-cluster-0.elasticsearch,es-cluster-1.elasticsearch,es-cluster-2.elasticsearch'
+          - name: cluster.initial_master_nodes
+            value: 'es-cluster-0,es-cluster-1,es-cluster-2'
+          - name: ES_JAVA_OPTS
+            value: '-Xms512m -Xmx512m'
+      volumes:
+      - name: data
+        hostPath:
+          path: /var/lib/elasticsearch
+          type: DirectoryOrCreate
+      initContainers:
+      - name: fix-permissions
+        image: alpine:3.9
+        command: ['sh', '-c', 'chown -R 1000:1000 /usr/share/elasticsearch/data']
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: data
+          mountPath: /usr/share/elasticsearch/data
+      - name: increase-vm-max-map
+        image: alpine:3.9
+        command: ['sysctl', '-w', 'vm.max_map_count=262144']
+        securityContext:
+          privileged: true
+      - name: increase-fd-ulimit
+        image: alpine:3.9
+        command: ['sh', '-c', 'ulimit -n 65536']
+        securityContext:
+          privileged: true
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: elasticsearch
+  namespace: kube-logging
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+  - host: elasticsearch.logging.cluster.local
+    http:
+      paths:
+      - backend:
+          serviceName: elasticsearch
+          servicePort: 9200
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana
+  namespace: kube-logging
+  labels:
+    app: kibana
+spec:
+  ports:
+  - port: 5601
+  selector:
+    app: kibana
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kibana
+  namespace: kube-logging
+  labels:
+    app: kibana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kibana
+  template:
+    metadata:
+      labels:
+        app: kibana
+    spec:
+      containers:
+      - name: kibana
+        image: docker.elastic.co/kibana/kibana:${ELASTICSEARCH_VERSION}
+        resources:
+          limits:
+            cpu: 1000m
+          requests:
+            cpu: 100m
+        env:
+          - name: ELASTICSEARCH_URL
+            value: http://elasticsearch:9200
+        ports:
+        - containerPort: 5601
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: kibana
+  namespace: kube-logging
+  annotations:
+    kubernetes.io/ingress.class: nginx
+spec:
+  rules:
+  - host: kibana.logging.cluster.local
+    http:
+      paths:
+      - backend:
+          serviceName: kibana
+          servicePort: 5601
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fluentd
+  namespace: kube-logging
+  labels:
+    app: fluentd
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: fluentd
+  labels:
+    app: fluentd
+rules:
+- apiGroups:
+  - ''
+  resources:
+  - pods
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: fluentd
+roleRef:
+  kind: ClusterRole
+  name: fluentd
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  name: fluentd
+  namespace: kube-logging
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fluentd
+  namespace: kube-logging
+  labels:
+    app: fluentd
+spec:
+  selector:
+    matchLabels:
+      app: fluentd
+  template:
+    metadata:
+      labels:
+        app: fluentd
+    spec:
+      serviceAccount: fluentd
+      serviceAccountName: fluentd
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      containers:
+      - name: fluentd
+        image: fluent/fluentd-kubernetes-daemonset:v1.11.2-debian-elasticsearch7-1.0
+        env:
+          - name:  FLUENT_ELASTICSEARCH_HOST
+            value: elasticsearch.kube-logging.svc.cluster.local
+          - name:  FLUENT_ELASTICSEARCH_PORT
+            value: '9200'
+          - name: FLUENT_ELASTICSEARCH_SCHEME
+            value: http
+          - name: FLUENTD_SYSTEMD_CONF
+            value: disable
+        resources:
+          limits:
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 200Mi
+        volumeMounts:
+        - name: varlog
+          mountPath: /var/log
+        - name: varlibdockercontainers
+          mountPath: /var/lib/docker/containers
+          readOnly: true
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: varlog
+        hostPath:
+          path: /var/log
+      - name: varlibdockercontainers
+        hostPath:
+          path: /var/lib/docker/containers
+EOF
+    """
+    local s="$?"
+    check_exit_code "$s" "apply" "add elasticsearch"
+      
+    if [[ "$s" == "0" ]]; then
+      local conn=$(get_ingress_conn)
+      log::access "[ingress]" "curl -H 'Host:kibana.logging.cluster.local' ${conn}"
+      log::access "[ingress]" "curl -H 'Host:elasticsearch.logging.cluster.local' ${conn}"
+    fi
+  else
+    log::warning "[log]" "No $KUBE_LOG config."
+  fi
+
+}
+
+
+function add_storage() {
+  # 添加存储 
+
+  if [[ "$KUBE_STORAGE" == "rook" ]]; then
+
+    log::info "[storage]" "add rook"
+    log::info "[storage]" "download rook manifests"
+    exec_command "${INIT_NODE}" """
+      wget https://gh.lework.workers.dev/https://github.com/rook/rook/archive/v${ROOK_VERSION}.zip  -O /tmp/rook-${ROOK_VERSION}.zip
+      command -v unzip 2>/dev/null || yum install -y unzip
+      unzip -o /tmp/rook-${ROOK_VERSION}.zip -d /tmp/
+    """
+    check_exit_code "$?" "storage" "download rook manifests"
+
+    log::info "[storage]" "add rook operator"
+    exec_command "${INIT_NODE}" """
+      cd /tmp/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/ \
+      && kubectl apply -f common.yaml -f operator.yaml
+    """
+    check_exit_code "$?" "apply" "add rook operator"
+
+    log::info "[storage]" "create ceph cluster"
+    exec_command "${INIT_NODE}" """
+      cd /tmp/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/ \
+      && kubectl apply -f cluster.yaml
+"""
+    check_exit_code "$?" "apply" "add ceph"
+
+  else
+    log::warning "[storage]" "No $KUBE_STORAGE config."
   fi
 }
 
@@ -1360,7 +1750,7 @@ spec:
             - name: ETCDCTL_API
               value: '3'
             command: ['/bin/sh']
-            args: [\"-c\", \\\"etcdctl --endpoints=https://127.0.0.1:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt --key=/etc/kubernetes/pki/etcd/healthcheck-client.key snapshot save /var/lib/etcd/etcd-snapshot-\\\$(date +%Y-%m-%d_%H:%M:%S_%Z).db\\\"]
+            args: [\"-c\", \"etcdctl --endpoints=https://127.0.0.1:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt --key=/etc/kubernetes/pki/etcd/healthcheck-client.key snapshot save /var/lib/etcd/etcd-snapshot-\\\$(date +%Y-%m-%d_%H:%M:%S_%Z).db\"]
             volumeMounts:
             - mountPath: /etc/kubernetes/pki/etcd
               name: etcd-certs
@@ -1392,13 +1782,13 @@ function kube_status() {
   
   sleep 5
   log::info "[cluster]" "cluster status"
-  sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${INIT_NODE} -p ${SSH_PORT} "
+  exec_command "${INIT_NODE}" "
      echo
      kubectl get node -o wide
      echo
-     kubectl -n kube-system get pods
-  " 2>> $LOG_FILE | tee -a $LOG_FILE
-
+     kubectl get pods -A
+  "
+  [[ "$?" == "0" ]] && printf "${COMMAND_OUTPUT}"
 }
 
 
@@ -1414,7 +1804,7 @@ function reset_node() {
     sed -i -e \"/$KUBE_APISERVER/d\" -e '/-worker-/d' -e '/-master-/d' /etc/hosts
     iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X
     [ -d /var/lib/kubelet ] && find /var/lib/kubelet | xargs -n 1 findmnt -n -t tmpfs -o TARGET -T | uniq | xargs -r umount -v
-    rm -rf /etc/kubernetes/* /var/lib/etcd/* \$HOME/.kube /etc/cni/net.d/*
+    rm -rf /etc/kubernetes/* /var/lib/etcd/* \$HOME/.kube /etc/cni/net.d/* /var/lib/elasticsearch/*
     docker rm -f -v \$(docker ps | grep kube | awk '{print \$1}') || echo 0
     systemctl restart docker
     ipvsadm --clear || echo 0
@@ -1429,7 +1819,14 @@ function reset_node() {
 function reset_all() {
   # 重置所有节点
   
-  for host in $MASTER_NODES $WORKER_NODES
+  local all_node=""
+  
+  exec_command "${INIT_NODE}" "
+    kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {end}'
+  "
+  [[ "$?" == "0" ]] && all_node="${COMMAND_OUTPUT}"
+
+  for host in $all_node
   do
     reset_node "$host"
   done
@@ -1451,15 +1848,17 @@ function start_init() {
   kubeadm_init
   # 5. 加入集群
   join_cluster
-  # 6. 安装addon
+  # 6. 添加network
+  add_network
+  # 7. 安装addon
   add_addon
-  # 7. 添加ingress
+  # 8. 添加ingress
   add_ingress
-  # 8. 添加monitor
+  # 9. 添加monitor
   [[ "x${MONITOR_TAG:-}" == "x1" ]] && add_monitor
-  # 9. 运维操作
+  # 10. 运维操作
   kube_ops
-  # 10. 查看集群状态
+  # 11. 查看集群状态
   kube_status
 }
 
@@ -1484,18 +1883,22 @@ function del_node() {
   for host in $MASTER_NODES $WORKER_NODES
   do
     log::info "[del]" "node $host"
-    local node_name=$(kubectl get node -o wide | grep $host | awk '{print $1}')
-    if [[ "$node_name" == "" ]]; then
+
+    exec_command "${INIT_NODE}" "
+      kubectl get node -o wide | grep $host | awk '{print \$1}'
+    "
+    [[ "$?" == "0" ]] && local node_name="${COMMAND_OUTPUT}"
+    if [[ "${node_name:-}" == "" ]]; then
       log::err "[del]" "node $host not found."
       continue
     fi
 
     log::info "[del]" "drain $host"
-    exec_command "127.0.0.1" "kubectl drain $node_name --force --ignore-daemonsets --delete-local-data"
+    exec_command "${INIT_NODE}" "kubectl drain $node_name --force --ignore-daemonsets --delete-local-data"
     check_exit_code "$?" "del" "$host: drain"
 
     log::info "[del]" "delete node $host"
-    exec_command "127.0.0.1" "kubectl delete node $node_name"
+    exec_command "${INIT_NODE}" "kubectl delete node $node_name"
     check_exit_code "$?" "del" "$host: delete"
 
     sleep 3
@@ -1532,6 +1935,8 @@ Flag:
   -n,--network    cluster network, choose: [flannel,calico], default: ${KUBE_NETWORK}
   -i,--ingress    ingress controller, choose: [nginx,traefik], default: ${KUBE_INGRESS}
   -M,--monitor    cluster monitor, choose: [prometheus]
+  -l,--log        cluster log, choose: [elasticsearch]
+  -s,--storage    cluster storage, choose: [rook]
 
 Example:
   [cluster node]
@@ -1546,11 +1951,8 @@ Example:
 
   [cluster node]
   $0 reset \\
-  --master 192.168.77.130,192.168.77.131,192.168.77.132 \\
-  --worker 192.168.77.133,192.168.77.134,192.168.77.135 \\
   --user root \\
-  --password 123456 \\
-  --version 1.19.2
+  --password 123456
 
   [add node]
   $0 add \\
@@ -1568,8 +1970,10 @@ Example:
   --password 123456
  
   [other]
-  $0 add --monitor prometheus
   $0 add --ingress traefik
+  $0 add --monitor prometheus
+  $0 add --log elasticsearch
+  $0 add --storage rook
 
 EOF
   exit 1
@@ -1612,6 +2016,7 @@ while [ "${1:-}" != "" ]; do
                             KUBE_VERSION=${1:-$KUBE_VERSION}
                             ;;
     -n | --network )        shift
+                            NETWORK_TAG=1
                             KUBE_NETWORK=${1:-$KUBE_NETWORK}
                             ;;
     -i | --ingress )        shift
@@ -1621,6 +2026,14 @@ while [ "${1:-}" != "" ]; do
     -M | --monitor )        shift
                             MONITOR_TAG=1
                             KUBE_MONITOR=${1:-$KUBE_MONITOR}
+                            ;;
+    -l | --log )            shift
+                            LOG_TAG=1
+                            KUBE_LOG=${1:-$KUBE_LOG}
+                            ;;
+    -s | --storage )        shift
+                            STORAGE_TAG=1
+                            KUBE_STORAGE=${1:-$KUBE_STORAGE}
                             ;;
     * )                     usage
                             exit 1
@@ -1634,14 +2047,16 @@ check
 
 # 启动
 if [[ "x${RESET_TAG:-}" == "x1" ]]; then
-  [[ "$MASTER_NODES" == "" ]] && MASTER_NODES="127.0.0.1"
   reset_all
 elif [[ "x${INIT_TAG:-}" == "x1" ]]; then
   [[ "$MASTER_NODES" == "" ]] && MASTER_NODES="127.0.0.1"
   start_init
 elif [[ "x${ADD_TAG:-}" == "x1" ]]; then
+  [[ "x${NETWORK_TAG:-}" == "x1" ]] && { add_network; add=1; }
   [[ "x${INGRESS_TAG:-}" == "x1" ]] && { add_ingress; add=1; }
   [[ "x${MONITOR_TAG:-}" == "x1" ]] && { add_monitor; add=1; }
+  [[ "x${LOG_TAG:-}" == "x1" ]] && { add_log; add=1; }
+  [[ "x${STORAGE_TAG:-}" == "x1" ]] && { add_storage; add=1; }
   [[ "$MASTER_NODES" != "" || "$WORKER_NODES" != "" ]] && { add_node; add=1; }
   [[ "${add:-}" != "1" ]] && usage
 elif [[ "x${DEL_TAG:-}" == "x1" ]]; then
@@ -1649,4 +2064,3 @@ elif [[ "x${DEL_TAG:-}" == "x1" ]]; then
 else
   usage
 fi
-

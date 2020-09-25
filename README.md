@@ -17,7 +17,7 @@ OS: `centos 7.x`
 
 CPU: `2C`
 
-MEM: `2G`
+MEM: `4G`
 
 > 需要连通外网，用于下载 kube 组件和 docker 镜像。
 
@@ -41,6 +41,8 @@ MEM: `2G`
 - 安装`ingress`组件，可选`nginx`，`traefik`。
 - 安装`network`组件，可选`flannel`，`calico`， 需在初始化时指定。
 - 安装`monitor`组件，可选`prometheus`。
+- 安装`log`组件，可选`elasticsearch`。
+- 安装`storage`组件，可选`rook`。
 - 添加运维操作，如备份etcd快照。
 
 ## 使用
@@ -77,6 +79,8 @@ Flag:
   -n,--network    cluster network, choose: [flannel,calico], default: flannel
   -i,--ingress    ingress controller, choose: [nginx,traefik], default: nginx
   -M,--monitor    cluster monitor, choose: [prometheus]
+  -l,--log        cluster log, choose: [elasticsearch]
+  -s,--storage    cluster storage, choose: [rook]
 
 Example:
   [cluster node]
@@ -91,11 +95,8 @@ Example:
 
   [cluster node]
   kainstall.sh reset \
-  --master 192.168.77.130,192.168.77.131,192.168.77.132 \
-  --worker 192.168.77.133,192.168.77.134,192.168.77.135 \
   --user root \
-  --password 123456 \
-  --version 1.19.2
+  --password 123456
 
   [add node]
   kainstall.sh add \
@@ -113,14 +114,21 @@ Example:
   --password 123456
  
   [other]
-  kainstall.sh add --monitor prometheus
   kainstall.sh add --ingress traefik
+  kainstall.sh add --monitor prometheus
+  kainstall.sh add --log elasticsearch
+  kainstall.sh add --storage rook
 
 
-  See detailed log >>> /tmp/kainstall.RBfHgbjYUG/kainstall.log 
+ERROR Summary: 
+  
+ACCESS Summary: 
+  
+
+  See detailed log >>> /tmp/kainstall.zQe1s19qvb/kainstall.log
 ```
 
-> 脚本执行的详细日志都会保存在临时目录中 `/tmp/kainstall.RBfHgbjYUG/kainstall.log `
+> 脚本执行的详细日志都会保存在临时目录中 `/tmp/kainstall.zQe1s19qvb/kainstall.log`
 
 ### 初始化集群
 
@@ -149,15 +157,6 @@ bash kainstall.sh add --worker 192.168.77.134
 bash kainstall.sh add --master 192.168.77.135,192.168.77.136 --worker 192.168.77.137,192.168.77.138
 ```
 
-### 添加ingress
-
-> 操作需在 k8s master 节点上操作，ssh连接信息非默认时请指定
-
-```bash
-# 添加 nginx ingress
-bash kainstall.sh add --ingress nginx
-```
-
 ### 删除节点
 
 > 操作需在 k8s master 节点上操作，ssh连接信息非默认时请指定
@@ -176,10 +175,27 @@ bash kainstall.sh del --master 192.168.77.135,192.168.77.136 --worker 192.168.77
 
 ```bash
 bash kainstall.sh reset \
-  --master 192.168.77.130,192.168.77.131,192.168.77.132 \
-  --worker 192.168.77.133,192.168.77.134 \
   --user root \
   --password 123456 \
   --port 22 \
 ```
 
+### 其他操作
+
+> 操作需在 k8s master 节点上操作，ssh连接信息非默认时请指定
+
+**注意：** 添加组件时请保持节点的内存和cpu至少为`2C4G`的空闲。否则会导致节点下线且服务器卡死。
+
+```bash
+# 添加 nginx ingress
+bash kainstall.sh add --ingress nginx
+
+# 添加 prometheus
+bash kainstall.sh add --monitor prometheus
+
+# 添加 elasticsearch
+bash kainstall.sh add --log elasticsearch
+
+# 添加 rook
+bash kainstall.sh add --storage rook
+```
