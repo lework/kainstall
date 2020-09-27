@@ -1,4 +1,4 @@
-# kainstall  = kubeadm install
+# kainstall  =  kubeadm install kubernetes
 基于 kubeadm 一键部署 kubernetes 集群
 
 
@@ -43,6 +43,7 @@ MEM: `4G`
 - 安装`monitor`组件，可选`prometheus`。
 - 安装`log`组件，可选`elasticsearch`。
 - 安装`storage`组件，可选`rook`。
+- 升级到指定版本。
 - 添加运维操作，如备份etcd快照。
 
 ## 使用
@@ -68,6 +69,7 @@ Available Commands:
   reset           reset Kubernetes cluster.
   add             add nodes to the cluster.
   del             remove node from the cluster.
+  upgrade         Upgrading kubeadm clusters.
 
 Flag:
   -m,--master     master node, default: ''
@@ -89,9 +91,7 @@ Example:
   --worker 192.168.77.133,192.168.77.134,192.168.77.135 \
   --user root \
   --password 123456 \
-  --version 1.19.2 \
-  --network flannel \
-  --ingress nginx
+  --version 1.19.2
 
   [cluster node]
   kainstall.sh reset \
@@ -114,6 +114,7 @@ Example:
   --password 123456
  
   [other]
+  kainstall.sh upgrade --version 1.19.2
   kainstall.sh add --ingress traefik
   kainstall.sh add --monitor prometheus
   kainstall.sh add --log elasticsearch
@@ -198,4 +199,7 @@ bash kainstall.sh add --log elasticsearch
 
 # 添加 rook
 bash kainstall.sh add --storage rook
+
+# 升级版本
+kainstall.sh upgrade --version 1.19.2
 ```

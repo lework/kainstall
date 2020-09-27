@@ -2,7 +2,7 @@
 ###################################################################
 #Script Name	: kainstall.sh
 #Description	: Install kubernetes cluster using kubeadm.
-#Update Date    : 2020-09-25
+#Update Date    : 2020-09-27
 #Author       	: lework
 #Email         	: lework@yeah.net
 ###################################################################
@@ -72,7 +72,7 @@ trap 'printf "$ERROR_INFO$ACCESS_INFO"; echo -e "\n\n  See detailed log >>> $LOG
 
 function log::err() {
   local item="[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[31mERROR:   \033[0m$*\n"
-  ERROR_INFO="${ERROR_INFO}${item}"
+  ERROR_INFO="${ERROR_INFO}${item}  "
   printf "${item}" | tee -a $LOG_FILE
 }
 
@@ -86,6 +86,11 @@ function log::warning() {
 
 function log::access() {
   ACCESS_INFO="${ACCESS_INFO}$*\n  "
+}
+
+
+function version() {
+  echo "$@" | awk -F. '{ printf("%d%03d%03d%03d\n", $1,$2,$3,$4); }';
 }
 
 
@@ -108,6 +113,22 @@ function exec_command() {
     local status=$?
   fi
   return $status
+}
+
+
+function command_exists() {
+  # 检查命令是否存在
+  
+  local cmd=${1}
+  local package=${2}
+
+  if command -V "$cmd" > /dev/null 2>&1; then
+    log::info "[check]" "$cmd command exists."
+  else
+    log::warning "[check]" "I require $cmd but it's not installed."
+    log::warning "[check]" "install $package package."
+    yum -y install ${package} >> $LOG_FILE 2>&1
+  fi
 }
 
 
@@ -764,22 +785,6 @@ function install_package() {
 }
 
 
-function command_exists() {
-  # 检查命令是否存在
-  
-  local cmd=${1}
-  local package=${2}
-
-  if command -V "$cmd" > /dev/null 2>&1; then
-    log::info "[check]" "$cmd command exists."
-  else
-    log::warning "[check]" "I require $cmd but it's not installed."
-    log::warning "[check]" "install $package package."
-    yum -y install ${package} >> $LOG_FILE 2>&1
-  fi
-}
-
-
 function check_command() {
   # 检查用到的命令
   
@@ -801,7 +806,7 @@ function check_ssh_conn() {
 }
 
 
-function check_apiserver() {
+function check_apiserver_conn() {
   # 检查apiserver连通性
 
   exec_command "${INIT_NODE}" "
@@ -838,7 +843,7 @@ function check() {
   check_ssh_conn
 
   # check apiserver conn
-  [[ "x${RESET_TAG:-}" == "x1" || "x${ADD_TAG:-}" == "x1" || "x${DEL_TAG:-}" == "x1" ]] && check_apiserver  
+  [[ "x${INIT_TAG:-}" != "x1" ]] && check_apiserver_conn  
   
 }
 
@@ -866,6 +871,7 @@ kind: ClusterConfiguration
 kubernetesVersion: $KUBE_VERSION
 controlPlaneEndpoint: $KUBE_APISERVER:6443
 networking:
+  dnsDomain: cluster.local
   podSubnet: $KUBE_POD_SUBNET
   serviceSubnet: $KUBE_SERVICE_SUBNET
 imageRepository: $KUBE_IMAGE_REPO
@@ -1266,7 +1272,6 @@ function add_addon() {
   sed -i '/--secure-port=4443/a\          - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname' ${TMP_DIR}/metrics-server.yml
   kube_apply "${TMP_DIR}/metrics-server.yml"
 }
-
 
 
 function add_monitor() {
@@ -1909,6 +1914,100 @@ function del_node() {
 }
 
 
+function upgrage_node() {
+  # 节点软件升级
+
+  local role=${1:-init}
+  local version="-${2:-latest}"
+  version="${version#-latest}"
+
+  echo '[install] kubeadm'
+  kubeadm version
+  yum install -y kubeadm${version} --disableexcludes=kubernetes
+  kubeadm version
+
+  echo '[upgrade]'
+  if [[ "$role" == "init" ]]; then
+    local plan_info=$(kubeadm upgrade plan)
+    local v=$(printf "$plan_info" | grep 'kubeadm upgrade apply ' | awk '{print $4}')
+    printf "${plan_info}\n"
+    kubeadm upgrade apply ${v} -y
+  else
+    kubeadm upgrade node
+  fi
+
+  echo '[install] kubelet kubectl'
+  kubectl version --client=true
+  yum install -y kubelet${version} kubectl${version} --disableexcludes=kubernetes
+  kubectl version --client=true
+  systemctl daemon-reload
+  systemctl restart kubelet
+}
+
+
+function upgrade() {
+  # 升级
+
+  log::info "[upgrade]" "upgrade to $KUBE_VERSION"
+
+  if [[ "${KUBE_VERSION}" != "latest" ]]; then
+    local local_version=""
+    exec_command "${INIT_NODE}" "kubeadm version -o short"
+    [[ "$?" == "0" ]] && local_version="${COMMAND_OUTPUT#v}"
+    if [[ "${KUBE_VERSION}" == "${local_version}" ]];then
+      log::warning "[check]" "The specified version(${KUBE_VERSION}) is consistent with the local version(${local_version})!"
+      exit 1
+    fi
+
+    if [[ $(version $KUBE_VERSION) < $(version ${local_version}) ]];then
+      log::warning "[check]" "The specified version($KUBE_VERSION) is less than the local version(${local_version})!"
+      exit 1
+    fi
+
+    local stable_version=""
+    exec_command "${INIT_NODE}" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"
+    [[ "$?" == "0" ]] && stable_version="${COMMAND_OUTPUT#v}"
+    if [[ $(version $KUBE_VERSION) > $(version ${stable_version}) ]];then
+      log::warning "[check]" "The specified version($KUBE_VERSION) is more than the stable version(${stable_version})!"
+      exit 1
+    fi
+  fi
+
+  local node_hosts=""
+  exec_command "${INIT_NODE}" "
+    kubectl get node -o jsonpath='{range.items[*]}{.metadata.name } {end}'
+  "
+  [[ "$?" == "0" ]] && local node_hosts="${COMMAND_OUTPUT}"
+
+  local plan=0
+  for host in ${node_hosts}
+  do
+    log::info "[upgrade]" "node: $host"
+    exec_command "${INIT_NODE}" "kubectl drain ${host} --ignore-daemonsets --delete-local-data"
+    check_exit_code "$?" "upgrade" "drain ${host} node" "exit"
+    sleep 5
+
+    if [[ ${plan} == "0" ]]; then
+      exec_command "${host}" "$(declare -f upgrage_node); upgrage_node 'init' '$KUBE_VERSION'"
+      check_exit_code "$?" "upgrade" "plan and upgrade cluster on ${host}"
+      plan=1
+    else
+      exec_command "${host}" "$(declare -f upgrage_node); upgrage_node 'node' '$KUBE_VERSION'"
+      check_exit_code "$?" "upgrade" "upgrade ${host} node"
+    fi
+
+    exec_command "${INIT_NODE}" "kubectl wait --for=condition=Ready node/${host} --timeout=120s"
+    check_exit_code "$?" "upgrade" "${host} ready"
+    sleep 5
+    exec_command "${INIT_NODE}" "kubectl uncordon ${host}"
+    check_exit_code "$?" "upgrade" "uncordon ${host} node"
+
+  done
+  
+  kube_status
+}
+
+
 function usage {
   # 使用帮助
   
@@ -1924,6 +2023,7 @@ Available Commands:
   reset           reset Kubernetes cluster.
   add             add nodes to the cluster.
   del             remove node from the cluster.
+  upgrade         Upgrading kubeadm clusters.
 
 Flag:
   -m,--master     master node, default: ''
@@ -1945,9 +2045,7 @@ Example:
   --worker 192.168.77.133,192.168.77.134,192.168.77.135 \\
   --user root \\
   --password 123456 \\
-  --version 1.19.2 \\
-  --network flannel \\
-  --ingress nginx
+  --version 1.19.2
 
   [cluster node]
   $0 reset \\
@@ -1970,6 +2068,7 @@ Example:
   --password 123456
  
   [other]
+  $0 upgrade --version 1.19.2
   $0 add --ingress traefik
   $0 add --monitor prometheus
   $0 add --log elasticsearch
@@ -1996,6 +2095,8 @@ while [ "${1:-}" != "" ]; do
     add )                   ADD_TAG=1
                             ;;
     del )                   DEL_TAG=1
+                            ;;
+    upgrade )               UPGRADE_TAG=1
                             ;;
     -m | --master )         shift
                             MASTER_NODES=$(echo ${1:$MASTER_NODES} | tr ',' ' ')
@@ -2061,6 +2162,8 @@ elif [[ "x${ADD_TAG:-}" == "x1" ]]; then
   [[ "${add:-}" != "1" ]] && usage
 elif [[ "x${DEL_TAG:-}" == "x1" ]]; then
   [[ "$MASTER_NODES" != "" || "$WORKER_NODES" != "" ]] && del_node || usage
+elif [[ "x${UPGRADE_TAG:-}" == "x1" ]]; then
+  upgrade
 else
   usage
 fi
