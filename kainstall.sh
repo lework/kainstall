@@ -147,6 +147,21 @@ function init_node() {
   systemctl stop firewalld
   systemctl disable firewalld
 
+  # repo
+  [ -f /etc/yum.repos.d/CentOS-Base.repo ] && sed -e 's!^#baseurl=!baseurl=!g' \
+    -e 's!^mirrorlist=!#mirrorlist=!g' \
+    -e 's!mirror.centos.org!mirrors.aliyun.com!g' \
+    -i /etc/yum.repos.d/CentOS-Base.repo
+  
+  yum install -y epel-release
+  
+  [ -f /etc/yum.repos.d/CentOS-Base.repo ] && sed -e 's!^mirrorlist=!#mirrorlist=!g' \
+    -e 's!^metalink=!#metalink=!g' \
+    -e 's!^#baseurl=!baseurl=!g' \
+    -e 's!//download\.fedoraproject\.org/pub!//mirrors.aliyun.com!g' \
+    -e 's!http://mirrors\.aliyun!https://mirrors.aliyun!g' \
+    -i /etc/yum.repos.d/epel.repo
+
   # Change limits
   [ ! -f /etc/security/limits.conf_bak ] && cp /etc/security/limits.conf{,_bak}
   cat << EOF > /etc/security/limits.conf
