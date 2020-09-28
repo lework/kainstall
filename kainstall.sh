@@ -182,8 +182,8 @@ root hard core unlimited
 * hard core unlimited
 EOF
 
-  [ ! -f /etc/security/limits.d/20-nproc.conf ] && sed -i 's#4096#655360#g' /etc/security/limits.d/20-nproc.conf
-  cat << EOF >> /etc/security/etc/systemd/system.conf
+  [ -f /etc/security/limits.d/20-nproc.conf ] && sed -i 's#4096#655360#g' /etc/security/limits.d/20-nproc.conf
+  cat << EOF >> /etc/systemd/system.conf
 DefaultLimitCORE=infinity
 DefaultLimitNOFILE=655360
 DefaultLimitNPROC=655360
@@ -871,6 +871,11 @@ function install_package() {
   done
 
   local apiservers=$MASTER_NODES
+  if [[ "$apiservers" == "127.0.0.1" ]]; then
+    exec_command "${INIT_NODE}" "ip -o route get to 8.8.8.8 | sed -n 's/.*src \([0-9.]\+\).*/\1/p'"
+    [[ "$?" == "0" ]] && apiservers="${COMMAND_OUTPUT}"
+  fi
+
   if [[ "x${ADD_TAG:-}" == "x1" ]]; then
     exec_command "${INIT_NODE}" "
       kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{$.items[*].status.addresses[?(@.type==\"InternalIP\")].address}'
