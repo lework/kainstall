@@ -59,6 +59,8 @@ MEM: `4G`
 
 ## 使用
 
+> 详细介绍请见：https://lework.github.io/2020/09/26/kainstall
+
 ### 下载脚本
 
 ```bash

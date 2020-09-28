@@ -87,6 +87,7 @@ function log::warning() {
 
 function log::access() {
   ACCESS_INFO="${ACCESS_INFO}$*\n  "
+  echo -e "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[32mINFO:    \033[0m$*\n" >> $LOG_FILE
 }
 
 
