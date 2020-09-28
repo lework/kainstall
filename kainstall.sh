@@ -511,8 +511,8 @@ function init_upgrade_kernel() {
   done
 
   log::info "[notice]" "Please execute the command again!" 
-  log::info "[cmd]" "bash kainstall.sh ${SCRIPT_PARAMETER%%--upgrade-kernel}"
-  log::access "[cmd]" "bash kainstall.sh ${SCRIPT_PARAMETER%%--upgrade-kernel}"
+  log::info "[cmd]" "bash $0 ${SCRIPT_PARAMETER%%--upgrade-kernel}"
+  log::access "[cmd]" "bash $0 ${SCRIPT_PARAMETER%%--upgrade-kernel}"
   exit 0
 }
 
@@ -2258,6 +2258,8 @@ while [ "${1:-}" != "" ]; do
   shift
 done
 
+# 开始
+log::info "[start]" "bash $0 ${SCRIPT_PARAMETER}"
 
 # 转换
 MASTER_NODES=$(echo ${MASTER_NODES} | tr ',' ' ')
