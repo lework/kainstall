@@ -36,14 +36,25 @@ MEM: `4G`
 ## 功能
 
 - 服务器初始化。
-- 安装`kube`组件。
-- 初始化`kubernetes`集群。
+  - 关闭`selinux`
+  - 关闭`swap`
+  - 关闭`firewalld`
+  - 配置`epel`源
+  - 修改`limits`
+  - 配置内核参数
+  - 配置`history` 记录
+  - 配置`journal` 日志
+  - 配置`chrony`时间同步
+  - 安装`ipvs`模块
+  - 更新内核
+- 安装`docker`, `kube`组件。
+- 初始化`kubernetes`集群,以及增加或删除节点。
 - 安装`ingress`组件，可选`nginx`，`traefik`。
 - 安装`network`组件，可选`flannel`，`calico`， 需在初始化时指定。
 - 安装`monitor`组件，可选`prometheus`。
 - 安装`log`组件，可选`elasticsearch`。
 - 安装`storage`组件，可选`rook`。
-- 升级到指定版本。
+- 升级到`kubernetes`指定版本。
 - 添加运维操作，如备份etcd快照。
 
 ## 使用
@@ -72,18 +83,19 @@ Available Commands:
   upgrade         Upgrading kubeadm clusters.
 
 Flag:
-  -m,--master     master node, default: ''
-  -w,--worker     work node, default: ''
-  -u,--user       ssh user, default: root
-  -p,--password   ssh password,default: 123456
-  -P,--port       ssh port, default: 22
-  -v,--version    kube version, default: latest
-  -n,--network    cluster network, choose: [flannel,calico], default: flannel
-  -i,--ingress    ingress controller, choose: [nginx,traefik], default: nginx
-  -M,--monitor    cluster monitor, choose: [prometheus]
-  -l,--log        cluster log, choose: [elasticsearch]
-  -s,--storage    cluster storage, choose: [rook]
-
+  -m,--master          master node, default: ''
+  -w,--worker          work node, default: ''
+  -u,--user            ssh user, default: root
+  -p,--password        ssh password,default: 123456
+  -P,--port            ssh port, default: 22
+  -v,--version         kube version, default: latest
+  -n,--network         cluster network, choose: [flannel,calico], default: flannel
+  -i,--ingress         ingress controller, choose: [nginx,traefik], default: nginx
+  -M,--monitor         cluster monitor, choose: [prometheus]
+  -l,--log             cluster log, choose: [elasticsearch]
+  -s,--storage         cluster storage, choose: [rook]
+  -U,--upgrade-kernel  upgrade kernel
+  
 Example:
   [cluster node]
   kainstall.sh init \

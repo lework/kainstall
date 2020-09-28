@@ -2,7 +2,7 @@
 ###################################################################
 #Script Name	: kainstall.sh
 #Description	: Install kubernetes cluster using kubeadm.
-#Update Date    : 2020-09-27
+#Update Date    : 2020-09-28
 #Author       	: lework
 #Email         	: lework@yeah.net
 ###################################################################
@@ -62,6 +62,7 @@ SSH_OPTIONS="-o ConnectTimeout=600 -o StrictHostKeyChecking=no -o UserKnownHosts
 ERROR_INFO="\n\033[31mERROR Summary: \033[0m\n  "
 ACCESS_INFO="\n\033[32mACCESS Summary: \033[0m\n  "
 COMMAND_OUTPUT=""
+SCRIPT_PARAMETER="$*"
 
 
 trap 'printf "$ERROR_INFO$ACCESS_INFO"; echo -e "\n\n  See detailed log >>> $LOG_FILE \n\n";exit' 1 2 3 15 EXIT
@@ -472,9 +473,55 @@ EOF
 }
 
 
+function upgrade_kernel() {
+  # 升级内核
+
+  local ver=$(rpm --eval '%{centos_ver}')
+
+  yum install -y https://www.elrepo.org/elrepo-release-${ver}.el${ver}.elrepo.noarch.rpm
+  sed -e 's!^mirrorlist=!#mirrorlist=!g' \
+      -e 's!elrepo.org/linux!mirrors.tuna.tsinghua.edu.cn/elrepo!g' \
+      -i /etc/yum.repos.d/elrepo.repo
+  yum --disablerepo="*" --enablerepo=elrepo-kernel install -y kernel-ml{,-devel}
+
+  grub2-set-default 0 && grub2-mkconfig -o /etc/grub2.cfg
+  grubby --default-kernel
+  grubby --args="user_namespace.enable=1" --update-kernel="$(grubby --default-kernel)"
+  
+}
+
+
+function init_upgrade_kernel() {
+  # 升级节点内核
+
+  [[ "x${UPGRADE_KERNEL_TAG:-}" != "x1" ]] && return
+
+  for host in $MASTER_NODES $WORKER_NODES
+  do
+    log::info "[init]" "upgrade kernel: $host"
+    exec_command "${host}" "$(declare -f upgrade_kernel); upgrade_kernel"
+    check_exit_code "$?" "init" "upgrade kernel $host"
+  done
+  
+  for host in $MASTER_NODES $WORKER_NODES
+  do
+    exec_command "${host}" "bash -c 'sleep 10 && reboot' &>/dev/null &"
+    check_exit_code "$?" "init" "$host: Wait for 10s to restart"
+  done
+
+  log::info "[notice]" "Please execute the command again!" 
+  log::info "[cmd]" "bash kainstall.sh ${SCRIPT_PARAMETER%%--upgrade-kernel}"
+  log::access "[cmd]" "bash kainstall.sh ${SCRIPT_PARAMETER%%--upgrade-kernel}"
+  exit 0
+}
+
+
 function init() {
   # 初始化节点
   
+
+  init_upgrade_kernel
+
   local index=1
   # master节点
   for host in $MASTER_NODES
@@ -543,12 +590,16 @@ function init() {
 
     index=$((index + 1))
   done
+
+
 }
 
 
 function init_add_node() {
   # 初始化添加的节点
   
+  init_upgrade_kernel
+
   local index=0
   exec_command "${INIT_NODE}" "
     kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
@@ -618,6 +669,42 @@ function init_add_node() {
     check_exit_code "$?" "init" "$host set hostname and resolve"
     index=$((index + 1))
   done
+}
+
+
+function haproxy_backend() {
+  # 添加或删除haproxy的后端server
+
+  local action=${1:-add}
+  local action_cmd=""
+  
+  if [[ "$MASTER_NODES" != "" && "$MASTER_NODES" != "127.0.0.1" ]]; then
+    exec_command "${INIT_NODE}" "
+      kubectl get node --selector='!node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].status.addresses[?(@.type==\"InternalIP\")].address}'
+    "
+    [[ "$?" == "0" ]] && local work_nodes="${COMMAND_OUTPUT}"
+    
+    for host in ${work_nodes:-}
+    do
+      log::info "[del]" "${host}: ${action} apiserver from haproxy"
+      for m in $MASTER_NODES
+      do
+        if [[ "${action}" == "add" ]]; then
+           local num=$(echo "${m}"| awk -F'.' '{print $4}')
+           action_cmd="echo \"    server apiserver${num} ${m}:6443 check\" >> /etc/haproxy/haproxy.cfg"
+        else
+           action_cmd="sed -i -e \"/${m}/d\" /etc/haproxy/haproxy.cfg"
+        fi
+
+        exec_command "${host}" "
+          ${action_cmd}
+          haproxy -c -f /etc/haproxy/haproxy.cfg
+          systemctl reload haproxy
+        "
+        check_exit_code "$?" "del" "${host}: ${action} apiserver(${m}) from haproxy"
+      done
+    done
+  fi
 }
 
 
@@ -1856,8 +1943,8 @@ function reset_all() {
 
 function start_init() {
   # 初始化集群
-  
-  INIT_NODE=$(echo $MASTER_NODES | awk '{print $1}')
+
+  INIT_NODE=$(echo ${MASTER_NODES} | awk '{print $1}')
 
   # 1. 初始化集群
   init
@@ -1892,7 +1979,9 @@ function add_node() {
   install_package
   # 3. 加入集群
   join_cluster
-  # 4. 查看集群状态
+  # 4. haproxy添加apiserver
+  haproxy_backend "add"
+  # 5. 查看集群状态
   kube_status
 }
 
@@ -1900,6 +1989,8 @@ function add_node() {
 function del_node() {
   # 删除节点
  
+  haproxy_backend "remove"
+
   for host in $MASTER_NODES $WORKER_NODES
   do
     log::info "[del]" "node $host"
@@ -2016,7 +2107,7 @@ function upgrade() {
     sleep 5
     exec_command "${INIT_NODE}" "kubectl uncordon ${host}"
     check_exit_code "$?" "upgrade" "uncordon ${host} node"
-
+    sleep 5
   done
   
   kube_status
@@ -2041,17 +2132,18 @@ Available Commands:
   upgrade         Upgrading kubeadm clusters.
 
 Flag:
-  -m,--master     master node, default: ''
-  -w,--worker     work node, default: ''
-  -u,--user       ssh user, default: ${SSH_USER}
-  -p,--password   ssh password,default: ${SSH_PASSWORD}
-  -P,--port       ssh port, default: ${SSH_PORT}
-  -v,--version    kube version, default: ${KUBE_VERSION}
-  -n,--network    cluster network, choose: [flannel,calico], default: ${KUBE_NETWORK}
-  -i,--ingress    ingress controller, choose: [nginx,traefik], default: ${KUBE_INGRESS}
-  -M,--monitor    cluster monitor, choose: [prometheus]
-  -l,--log        cluster log, choose: [elasticsearch]
-  -s,--storage    cluster storage, choose: [rook]
+  -m,--master          master node, default: ''
+  -w,--worker          work node, default: ''
+  -u,--user            ssh user, default: ${SSH_USER}
+  -p,--password        ssh password,default: ${SSH_PASSWORD}
+  -P,--port            ssh port, default: ${SSH_PORT}
+  -v,--version         kube version, default: ${KUBE_VERSION}
+  -n,--network         cluster network, choose: [flannel,calico], default: ${KUBE_NETWORK}
+  -i,--ingress         ingress controller, choose: [nginx,traefik], default: ${KUBE_INGRESS}
+  -M,--monitor         cluster monitor, choose: [prometheus]
+  -l,--log             cluster log, choose: [elasticsearch]
+  -s,--storage         cluster storage, choose: [rook]
+  -U,--upgrade-kernel  upgrade kernel
 
 Example:
   [cluster node]
@@ -2114,10 +2206,10 @@ while [ "${1:-}" != "" ]; do
     upgrade )               UPGRADE_TAG=1
                             ;;
     -m | --master )         shift
-                            MASTER_NODES=$(echo ${1:$MASTER_NODES} | tr ',' ' ')
+                            MASTER_NODES=${1:-$MASTER_NODES}
                             ;;
     -w | --worker )         shift
-                            WORKER_NODES=$(echo ${1:-$WORKER_NODES} | tr ',' ' ')
+                            WORKER_NODES=${1:-$WORKER_NODES}
                             ;;
     -u | --user )           shift
                             SSH_USER=${1:-$SSH_USER}
@@ -2151,12 +2243,19 @@ while [ "${1:-}" != "" ]; do
                             STORAGE_TAG=1
                             KUBE_STORAGE=${1:-$KUBE_STORAGE}
                             ;;
+    -U | --upgrade-kernel ) shift
+                            UPGRADE_KERNEL_TAG=1
+                            ;;
     * )                     usage
                             exit 1
   esac
   shift
 done
 
+
+# 转换
+MASTER_NODES=$(echo ${MASTER_NODES} | tr ',' ' ')
+WORKER_NODES=$(echo ${WORKER_NODES} | tr ',' ' ')
 
 # 预检
 check
