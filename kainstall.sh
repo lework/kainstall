@@ -91,7 +91,7 @@ function log::access() {
 }
 
 
-function version() {
+function version_to_number() {
   echo "$@" | awk -F. '{ printf("%d%03d%03d%03d\n", $1,$2,$3,$4); }';
 }
 
@@ -951,8 +951,8 @@ function check() {
   check_ssh_conn
 
   # check apiserver conn
-  [[ "x${INIT_TAG:-}" != "x1" ]] && check_apiserver_conn  
-  
+  [[ "x${INIT_TAG:-}" != "x1" && "x${RESET_TAG:-}" != "x1" ]] && check_apiserver_conn  
+
 }
 
 
@@ -1932,12 +1932,14 @@ function reset_node() {
 function reset_all() {
   # 重置所有节点
   
-  local all_node=""
+  local all_node="${MASTER_NODES} ${WORKER_NODES}"
   
   exec_command "${INIT_NODE}" "
     kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {end}'
   "
-  [[ "$?" == "0" ]] && all_node="${COMMAND_OUTPUT}"
+  [[ "$?" == "0" ]] && all_node="${all_node} ${COMMAND_OUTPUT}"
+  
+  all_node=$(echo "${all_node}" | awk '{for (i=1;i<=NF;i++) if (!a[$i]++) printf("%s%s",$i,FS)}')
 
   for host in $all_node
   do
@@ -2071,15 +2073,15 @@ function upgrade() {
       exit 1
     fi
 
-    if [[ $(version $KUBE_VERSION) < $(version ${local_version}) ]];then
+    if [[ $(version_to_number $KUBE_VERSION) < $(version_to_number ${local_version}) ]];then
       log::warning "[check]" "The specified version($KUBE_VERSION) is less than the local version(${local_version})!"
       exit 1
     fi
 
-    local stable_version=""
+    local stable_version="2"
     exec_command "${INIT_NODE}" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"
     [[ "$?" == "0" ]] && stable_version="${COMMAND_OUTPUT#v}"
-    if [[ $(version $KUBE_VERSION) > $(version ${stable_version}) ]];then
+    if [[ $(version_to_number $KUBE_VERSION) > $(version_to_number ${stable_version}) ]];then
       log::warning "[check]" "The specified version($KUBE_VERSION) is more than the stable version(${stable_version})!"
       exit 1
     fi
@@ -2269,9 +2271,7 @@ WORKER_NODES=$(echo ${WORKER_NODES} | tr ',' ' ')
 check
 
 # 启动
-if [[ "x${RESET_TAG:-}" == "x1" ]]; then
-  reset_all
-elif [[ "x${INIT_TAG:-}" == "x1" ]]; then
+if [[ "x${INIT_TAG:-}" == "x1" ]]; then
   [[ "$MASTER_NODES" == "" ]] && MASTER_NODES="127.0.0.1"
   start_init
 elif [[ "x${ADD_TAG:-}" == "x1" ]]; then
@@ -2284,6 +2284,8 @@ elif [[ "x${ADD_TAG:-}" == "x1" ]]; then
   [[ "${add:-}" != "1" ]] && usage
 elif [[ "x${DEL_TAG:-}" == "x1" ]]; then
   [[ "$MASTER_NODES" != "" || "$WORKER_NODES" != "" ]] && del_node || usage
+elif [[ "x${RESET_TAG:-}" == "x1" ]]; then
+  reset_all
 elif [[ "x${UPGRADE_TAG:-}" == "x1" ]]; then
   upgrade
 else
