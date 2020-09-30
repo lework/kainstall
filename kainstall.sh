@@ -23,11 +23,12 @@ KUBE_VERSION="latest"
 FLANNEL_VERSION="0.12.0"
 METRICS_SERVER_VERSION="0.3.7"
 INGRESS_NGINX="0.35.0"
-TRAEFIK_VERSION="2.3.0"
+TRAEFIK_VERSION="2.3.1"
 CALICO_VERSION="3.16.1"
 KUBE_PROMETHEUS_VERSION="0.6.0"
 ELASTICSEARCH_VERSION="7.9.2"
 ROOK_VERSION="1.3.11"
+KUBERNETES_DASHBOARD_VERSION="2.0.4"
  
 # 集群配置
 KUBE_APISERVER="apiserver.cluster.local"
@@ -39,6 +40,7 @@ KUBE_INGRESS="nginx"
 KUBE_MONITOR="prometheus"
 KUBE_STORAGE="rook"
 KUBE_LOG="elasticsearch"
+KUBE_UI="dashboard"
 
 # 定义的master和worker节点地址，以逗号分隔
 MASTER_NODES=""
@@ -1134,13 +1136,14 @@ EOF
 function get_ingress_conn(){
   # 获取ingress连接地址
 
+  local port=${1:-80}
   exec_command "${INIT_NODE}" "
     kubectl get node --selector='node-role.kubernetes.io/worker' -o jsonpath='{range.items[*]}{ .status.addresses[?(@.type==\"InternalIP\")].address } {end}' | awk '{print \$1}'
   "
   [[ "$?" == "0" ]] && local node_ip="${COMMAND_OUTPUT}"
 
   exec_command "${INIT_NODE}" "
-    kubectl get svc --all-namespaces -o go-template=\"{{range .items}}{{if eq .metadata.name \\\"ingress-${KUBE_INGRESS}-controller\\\"}}{{range.spec.ports}}{{if eq .port 80}}{{.nodePort}}{{end}}{{end}}{{end}}{{end}}\"
+    kubectl get svc --all-namespaces -o go-template=\"{{range .items}}{{if eq .metadata.name \\\"ingress-${KUBE_INGRESS}-controller\\\"}}{{range.spec.ports}}{{if eq .port ${port}}}{{.nodePort}}{{end}}{{end}}{{end}}{{end}}\"
   "
   [[ "$?" == "0" ]] && local node_port="${COMMAND_OUTPUT}"
   
@@ -1243,16 +1246,62 @@ spec:
         - name: traefik
           image: traefik:v${TRAEFIK_VERSION}
           args:
-            - --log.level=DEBUG
-            - --api
-            - --api.insecure
-            - --entrypoints.web.address=:80
+            - --api.debug=true
+            - --api.insecure=true
+            - --log=true
+            - --log.level=debug
+            - --ping=true
+            - --accesslog=true
+            - --entrypoints.http.Address=:80
+            - --entrypoints.https.Address=:443
+            - --entrypoints.traefik.Address=:8080
             - --providers.kubernetesingress
+            - --serverstransport.insecureskipverify=true
           ports:
-            - name: web
+            - name: http
               containerPort: 80
+              protocol: TCP
+            - name: https
+              containerPort: 443
+              protocol: TCP
             - name: admin
               containerPort: 8080
+              protocol: TCP
+          livenessProbe:
+            failureThreshold: 2
+            httpGet:
+              path: /ping
+              port: admin
+              scheme: HTTP
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            successThreshold: 1
+            timeoutSeconds: 1
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /ping
+              port: admin
+              scheme: HTTP
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          resources:
+            limits:
+              cpu: 250m
+              memory: 128Mi
+            requests:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            capabilities:
+              add:
+              - NET_BIND_SERVICE
+              drop:
+              - ALL
+      restartPolicy: Always
+      serviceAccount: ingress-traefik-controller
+      serviceAccountName: ingress-traefik-controller
 
 ---
 apiVersion: v1
@@ -1266,8 +1315,12 @@ spec:
   ports:
     - protocol: TCP
       port: 80
-      name: web
+      name: http
       targetPort: 80
+    - protocol: TCP
+      port: 443
+      name: https
+      targetPort: 443
     - protocol: TCP
       port: 8080
       name: admin
@@ -1282,6 +1335,61 @@ spec:
 
   if [[ "x$add_ingress_demo" == "x1" ]]; then
     sleep 3
+    log::info "[ingress]" "add ingress default-http-backend"
+    kube_apply "default-http-backend" """
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: default-http-backend
+  labels:
+    app.kubernetes.io/name: default-http-backend
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: default-http-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: default-http-backend
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: default-http-backend
+        image: ${KUBE_IMAGE_REPO}/defaultbackend:1.4
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+            scheme: HTTP
+          initialDelaySeconds: 30
+          timeoutSeconds: 5
+        ports:
+        - containerPort: 8080
+        resources:
+          limits:
+            cpu: 10m
+            memory: 20Mi
+          requests:
+            cpu: 10m
+            memory: 20Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: default-http-backend
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: default-http-backend
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+  selector:
+    app.kubernetes.io/name: default-http-backend
+"""
     log::info "[ingress]" "add ingress app demo"
     kube_apply "ingress-demo-app" """
 ---
@@ -1837,6 +1945,91 @@ function add_storage() {
 }
 
 
+function add_ui() {
+  # 添加用户界面
+
+  if [[ "$KUBE_UI" == "dashboard" ]]; then
+    log::info "[ui]" "add kubernetes dashboard"
+    log::info "[ui]" "download dashboard manifests"
+    exec_command "${INIT_NODE}" "
+      kubectl apply -f https://cdn.jsdelivr.net/gh/kubernetes/dashboard@v${KUBERNETES_DASHBOARD_VERSION}/aio/deploy/recommended.yaml
+    "
+    check_exit_code "$?" "apply" "add kubernetes dashboard"
+
+    exec_command "${INIT_NODE}" """
+      cat <<EOF | kubectl apply -f -
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  annotations:
+    kubernetes.io/ingress.class: ${KUBE_INGRESS}
+$( if [[ $KUBE_INGRESS == "nginx" ]]; then
+echo """
+    nginx.ingress.kubernetes.io/secure-backends: 'true'
+    nginx.ingress.kubernetes.io/backend-protocol: 'HTTPS'
+    nginx.ingress.kubernetes.io/ssl-passthrough: 'true'
+""";
+elif [[ $KUBE_INGRESS == "traefik" ]]; then 
+echo """
+    traefik.ingress.kubernetes.io/frontend-entry-points: https
+    traefik.ingress.kubernetes.io/auth-type: 'basic'
+    traefik.ingress.kubernetes.io/auth-secret: 'kubernetes-dashboard-auth'
+    traefik.ingress.kubernetes.io/ssl-redirect: 'true'
+""";
+fi
+)
+  name: kubernetes-dashboard
+  namespace: kubernetes-dashboard 
+spec:
+$( if [[ $KUBE_INGRESS == "nginx" ]]; then
+echo """
+  tls:
+  - hosts:
+    - kubernetes-dashboard.cluster.local
+    secretName: kubernetes-dashboard-certs
+"""
+elif [[ $KUBE_INGRESS == "traefik" ]]; then 
+echo """
+"""
+fi
+)
+  rules:
+  - host: kubernetes-dashboard.cluster.local
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: kubernetes-dashboard
+          servicePort: 443
+EOF
+    """
+    local s="$?"
+    check_exit_code "$s" "apply" "add kubernetes dashboard ingress"
+      
+    if [[ "$s" == "0" ]]; then
+      local conn=$(get_ingress_conn "443")
+      log::access "[ingress]" "curl -H 'Host:kubernetes-dashboard.cluster.local' http://${conn}"
+
+      exec_command "${INIT_NODE}" """
+        kubectl create serviceaccount kubernetes-dashboard-admin-sa -n kubernetes-dashboard
+        kubectl create clusterrolebinding kubernetes-dashboard-admin-sa --clusterrole=cluster-admin --serviceaccount=default:kubernetes-dashboard-admin-sa -n kubernetes-dashboard
+      """
+      s="$?"
+      check_exit_code "$s" "ui" "create kubernetes dashboard admin service account"
+      exec_command "${INIT_NODE}" """
+        kubectl describe secrets \$(kubectl describe sa dashboard-admin-sa | awk '/Tokens/ {print \$2}') | awk '/token:/{print \$2}'
+      """
+      s="$?"
+      check_exit_code "$s" "ui" "get kubernetes dashboard admin token"
+      [[ "$s" == "0" ]] && log::access "[Token]" "${COMMAND_OUTPUT}"
+    fi
+
+  else
+    log::warning "[ui]" "No $KUBE_UI config."
+  fi
+}
+
+
 function kube_ops() {
    # 运维操作
    
@@ -1969,11 +2162,13 @@ function start_init() {
   add_addon
   # 8. 添加ingress
   add_ingress
-  # 9. 添加monitor
+  # 9. 添加web ui
+  add_ui
+  # 10. 添加monitor
   [[ "x${MONITOR_TAG:-}" == "x1" ]] && add_monitor
-  # 10. 运维操作
+  # 11. 运维操作
   kube_ops
-  # 11. 查看集群状态
+  # 12. 查看集群状态
   kube_status
 }
 
@@ -2148,6 +2343,7 @@ Flag:
   -v,--version         kube version, default: ${KUBE_VERSION}
   -n,--network         cluster network, choose: [flannel,calico], default: ${KUBE_NETWORK}
   -i,--ingress         ingress controller, choose: [nginx,traefik], default: ${KUBE_INGRESS}
+  -ui,--ui             cluster web ui, choose: [dashboard], default: ${KUBE_UI}
   -M,--monitor         cluster monitor, choose: [prometheus]
   -l,--log             cluster log, choose: [elasticsearch]
   -s,--storage         cluster storage, choose: [rook]
@@ -2188,6 +2384,7 @@ Example:
   $0 add --monitor prometheus
   $0 add --log elasticsearch
   $0 add --storage rook
+  $0 add --ui dashboard
 
 EOF
   exit 1
@@ -2251,6 +2448,10 @@ while [ "${1:-}" != "" ]; do
                             STORAGE_TAG=1
                             KUBE_STORAGE=${1:-$KUBE_STORAGE}
                             ;;
+    -ui | --ui )            shift
+                            UI_TAG=1
+                            KUBE_UI=${1:-$KUBE_UI}
+                            ;;
     -U | --upgrade-kernel ) shift
                             UPGRADE_KERNEL_TAG=1
                             ;;
@@ -2280,6 +2481,7 @@ elif [[ "x${ADD_TAG:-}" == "x1" ]]; then
   [[ "x${MONITOR_TAG:-}" == "x1" ]] && { add_monitor; add=1; }
   [[ "x${LOG_TAG:-}" == "x1" ]] && { add_log; add=1; }
   [[ "x${STORAGE_TAG:-}" == "x1" ]] && { add_storage; add=1; }
+  [[ "x${UI_TAG:-}" == "x1" ]] && { add_ui; add=1; }
   [[ "$MASTER_NODES" != "" || "$WORKER_NODES" != "" ]] && { add_node; add=1; }
   [[ "${add:-}" != "1" ]] && usage
 elif [[ "x${DEL_TAG:-}" == "x1" ]]; then

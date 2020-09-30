@@ -54,6 +54,7 @@ MEM: `4G`
 - 安装`monitor`组件，可选`prometheus`。
 - 安装`log`组件，可选`elasticsearch`。
 - 安装`storage`组件，可选`rook`。
+- 安装`web ui`组件，可选`dashboard`。
 - 升级到`kubernetes`指定版本。
 - 添加运维操作，如备份etcd快照。
 
@@ -93,11 +94,12 @@ Flag:
   -v,--version         kube version, default: latest
   -n,--network         cluster network, choose: [flannel,calico], default: flannel
   -i,--ingress         ingress controller, choose: [nginx,traefik], default: nginx
+  -ui,--ui             cluster web ui, choose: [dashboard], default: dashboard
   -M,--monitor         cluster monitor, choose: [prometheus]
   -l,--log             cluster log, choose: [elasticsearch]
   -s,--storage         cluster storage, choose: [rook]
   -U,--upgrade-kernel  upgrade kernel
-  
+
 Example:
   [cluster node]
   kainstall.sh init \
@@ -133,6 +135,7 @@ Example:
   kainstall.sh add --monitor prometheus
   kainstall.sh add --log elasticsearch
   kainstall.sh add --storage rook
+  kainstall.sh add --ui dashboard
 
 
 ERROR Summary: 
