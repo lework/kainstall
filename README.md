@@ -13,13 +13,13 @@
 
 ## 要求
 
-OS: `centos 7.x`
+OS: `centos 7.x`, `centos 8.x`
 
 CPU: `2C`
 
 MEM: `4G`
 
-> 需要连通外网，用于下载 kube 组件和 docker 镜像。
+> 未指定离线包时，需要连通外网，用于下载 kube 组件和 docker 镜像。
 
 
 
@@ -57,6 +57,27 @@ MEM: `4G`
 - 安装`web ui`组件，可选`dashboard`。
 - 升级到`kubernetes`指定版本。
 - 添加运维操作，如备份etcd快照。
+- 支持**离线部署**。
+
+## 默认版本
+
+| 软件                 | 默认版本 |
+| -------------------- | -------- |
+| docker               | latest   |
+| kube                 | latest   |
+| fannel               | 0.12.0   |
+| metrics server       | 0.3.7    |
+| ingress nginx        | 0.35.0   |
+| traefik              | 2.3.1    |
+| calico               | 3.16.1   |
+| kube_prometheus      | 0.6.0    |
+| elasticsearch        | 7.9.2    |
+| rook                 | 1.4.5    |
+| kubernetes_dashboard | 2.0.4    |
+
+除 **kube组件** 版本可以通过参数(`--version`) 指定外，其他的软件版本需在脚本中指定。
+
+
 
 ## 使用
 
@@ -99,7 +120,8 @@ Flag:
   -l,--log             cluster log, choose: [elasticsearch]
   -s,--storage         cluster storage, choose: [rook]
   -U,--upgrade-kernel  upgrade kernel
-
+  -of,--offline-file   specify the offline package file to load
+ 
 Example:
   [cluster node]
   kainstall.sh init \
@@ -219,4 +241,42 @@ bash kainstall.sh add --storage rook
 
 # 升级版本
 kainstall.sh upgrade --version 1.19.2
+```
+
+### 离线部署
+
+**注意**
+
+脚本执行的宿主机上，需要安装 `tar` 命令，用于解压离线包。
+
+
+
+**下载指定版本的离线包**
+
+```bash
+wget http://kainstall.oss-cn-shanghai.aliyuncs.com/1.19.2/centos7.tgz
+```
+> 离线包信息，见 [kainstall-offline](https://github.com/lework/kainstall-offline) 仓库
+
+
+**初始化集群**
+
+> 指定 `--offline-file` 参数。
+
+```bash
+bash kainstall.sh init \
+  --master 192.168.77.130,192.168.77.131,192.168.77.132 \
+  --worker 192.168.77.133,192.168.77.134 \
+  --offline-file centos7.tgz 
+```
+
+**添加节点**
+
+> 指定 --offline-file 参数。
+
+```bash
+bash kainstall.sh add \
+  --master 192.168.77.135 \
+  --worker 192.168.77.136 \
+  --offline-file centos7.tgz
 ```
