@@ -47,7 +47,7 @@ MASTER_NODES=""
 WORKER_NODES=""
 
 # 定义在哪个节点上进行设置
-INIT_NODE="127.0.0.1"
+MGMT_NODE="127.0.0.1"
 
 # 节点的连接信息
 SSH_USER="root"
@@ -102,6 +102,29 @@ function utils::version_to_number() {
   # 版本号转数字
 
   echo "$@" | awk -F. '{ printf("%d%03d%03d%03d\n", $1,$2,$3,$4); }';
+}
+
+
+function utils::retry {
+  # 重试
+
+  local retries=$1
+  shift
+
+  local count=0
+  until eval "$@"; do
+    exit=$?
+    wait=$((2 ** $count))
+    count=$(($count + 1))
+    if [ $count -lt $retries ]; then
+      echo "Retry $count/$retries exited $exit, retrying in $wait seconds..."
+      sleep $wait
+    else
+      echo "Retry $count/$retries exited $exit, no more retries left."
+      return $exit
+    fi
+  done
+  return 0
 }
 
 
@@ -257,9 +280,9 @@ fs.nr_open = 2097152
 fs.suid_dumpable = 0
 
 # 文件监控
-fs.inotify.max_user_instances=1024
-fs.inotify.max_user_watches=102400
-fs.inotify.max_queued_events=65536
+fs.inotify.max_user_instances=8192
+fs.inotify.max_user_watches=524288
+fs.inotify.max_queued_events=16384
 
 #############################################################################################
 # 调整网络设置
@@ -319,7 +342,7 @@ net.ipv4.tcp_fin_timeout = 15
 
 # 积压套接字的最大数量。
 # Default is 128.
-net.core.somaxconn = 4096
+net.core.somaxconn = 32768
 
 # 打开syncookies以进行SYN洪水攻击保护。
 net.ipv4.tcp_syncookies = 1
@@ -384,6 +407,7 @@ net.ipv4.conf.default.send_redirects = 0
 net.ipv4.ip_forward = 1
 
 # 禁止IPv6
+net.ipv6.conf.lo.disable_ipv6=1
 net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 
@@ -392,13 +416,27 @@ net.bridge.bridge-nf-call-ip6tables = 1
 net.bridge.bridge-nf-call-iptables = 1
 net.bridge.bridge-nf-call-arptables = 1
 
+# arp缓存
+# 存在于 ARP 高速缓存中的最少层数，如果少于这个数，垃圾收集器将不会运行。缺省值是 128
+net.ipv4.neigh.default.gc_thresh1=2048
+# 保存在 ARP 高速缓存中的最多的记录软限制。垃圾收集器在开始收集前，允许记录数超过这个数字 5 秒。缺省值是 512
+net.ipv4.neigh.default.gc_thresh2=4096
+# 保存在 ARP 高速缓存中的最多记录的硬限制，一旦高速缓存中的数目高于此，垃圾收集器将马上运行。缺省值是 1024
+net.ipv4.neigh.default.gc_thresh3=8192
+
 # 持久连接
 net.ipv4.tcp_keepalive_time = 600
 net.ipv4.tcp_keepalive_intvl = 30
 net.ipv4.tcp_keepalive_probes = 10
 
-# 增加conntrack表的大小
-net.netfilter.nf_conntrack_max=1024000
+# conntrack表
+net.nf_conntrack_max=1048576
+net.netfilter.nf_conntrack_max=1048576
+net.netfilter.nf_conntrack_buckets=262144
+net.netfilter.nf_conntrack_tcp_timeout_fin_wait=30
+net.netfilter.nf_conntrack_tcp_timeout_time_wait=30
+net.netfilter.nf_conntrack_tcp_timeout_close_wait=15
+net.netfilter.nf_conntrack_tcp_timeout_established=300
 
 #############################################################################################
 # 调整内核参数
@@ -412,6 +450,14 @@ kernel.randomize_va_space = 2
 
 # 调高 PID 数量
 kernel.pid_max = 65536
+kernel.threads-max=30938
+
+# coredump
+kernel.core_pattern=core
+
+# 决定了检测到soft lockup时是否自动panic，缺省值是0
+kernel.softlockup_all_cpu_backtrace=1
+kernel.softlockup_panic=1
 EOF
   sysctl --system
 
@@ -430,9 +476,22 @@ HISTTIMEFORMAT="%Y-%m-%d %H:%M:%S \$USER_IP:\$(whoami) "
 export HISTFILESIZE HISTSIZE HISTTIMEFORMAT
 
 # PS1
-PS1="\[\033[0m\]\[\033[1;36m\][\u\[\033[0m\]@\[\033[1;32m\]\h\[\033[0m\] \[\033[1;31m\]\w\[\033[0m\]\[\033[1;36m\]]\[\033[33;1m\]# \[\033[0m\]"
+PS1='\[\033[0m\]\[\033[1;36m\][\u\[\033[0m\]@\[\033[1;32m\]\h\[\033[0m\] \[\033[1;31m\]\w\[\033[0m\]\[\033[1;36m\]]\[\033[33;1m\]\\$ \[\033[0m\]'
 ## Kainstall managed end
 EOF
+
+   # Disable Transparent Hugepages
+   if test -f /sys/kernel/mm/transparent_hugepage/enabled; then echo never > /sys/kernel/mm/transparent_hugepage/enabled;fi
+   if test -f /sys/kernel/mm/transparent_hugepage/defrag; then echo never > /sys/kernel/mm/transparent_hugepage/defrag;fi
+   cat <<EOF >> /etc/rc.local
+## Kainstall managed start
+# Disable Transparent Hugepages
+if test -f /sys/kernel/mm/transparent_hugepage/enabled; then echo never > /sys/kernel/mm/transparent_hugepage/enabled;fi
+if test -f /sys/kernel/mm/transparent_hugepage/defrag; then echo never > /sys/kernel/mm/transparent_hugepage/defrag;fi
+## Kainstall managed end
+EOF
+   chmod +x /etc/rc.local
+
    # journal
    mkdir -p /var/log/journal /etc/systemd/journald.conf.d
    cat << EOF > /etc/systemd/journald.conf.d/99-prophet.conf
@@ -729,7 +788,7 @@ function check::ssh_conn() {
 function check::apiserver_conn() {
   # 检查apiserver连通性
 
-  command::exec "${INIT_NODE}" "
+  command::exec "${MGMT_NODE}" "
      kubectl get node
   "
   check::exit_code "$?" "check" "conn apiserver" "exit"
@@ -790,12 +849,12 @@ function install::package() {
 
   local apiservers=$MASTER_NODES
   if [[ "$apiservers" == "127.0.0.1" ]]; then
-    command::exec "${INIT_NODE}" "ip -o route get to 8.8.8.8 | sed -n 's/.*src \([0-9.]\+\).*/\1/p'"
+    command::exec "${MGMT_NODE}" "ip -o route get to 8.8.8.8 | sed -n 's/.*src \([0-9.]\+\).*/\1/p'"
     [[ "$?" == "0" ]] && apiservers="${COMMAND_OUTPUT}" || true
   fi
 
   if [[ "x${ADD_TAG:-}" == "x1" ]]; then
-    command::exec "${INIT_NODE}" "
+    command::exec "${MGMT_NODE}" "
       kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{$.items[*].status.addresses[?(@.type==\"InternalIP\")].address}'
     "
     [[ "$?" == "0" ]] && apiservers="${COMMAND_OUTPUT}" || true
@@ -840,6 +899,115 @@ function init::upgrade_kernel() {
 }
 
 
+function cert::renew_node() {
+ # 节点证书续期
+ 
+  local role="${1:-master}"
+  local hosts=""
+  local kubelet_config=""
+  
+  command::exec "${MGMT_NODE}" "
+    kubectl get node --selector='node-role.kubernetes.io/${role}' -o jsonpath='{range.items[*]}{.metadata.name } {end}'
+  "
+  [[ "$?" == "0" ]] && hosts="${COMMAND_OUTPUT}" || true
+  
+  for host in ${hosts}
+  do
+    log::info "[cert]" "drain $host"
+    command::exec "${MGMT_NODE}" "kubectl drain $host --force --ignore-daemonsets --delete-local-data"
+    check::exit_code "$?" "cert" "$host: drain"
+    sleep 5
+    
+    if [[ "${role}" == "master" ]]; then 
+      command::exec "${host}" "cp -rf /etc/kubernetes /etc/kubernetes_\$(date +%Y-%m-%d)"
+      check::exit_code "$?" "cert" "$host: backup kubernetes config"
+      
+      command::exec "${host}" "kubeadm alpha certs renew all"
+      check::exit_code "$?" "cert" "$host: renew certs"
+      
+      command::exec "${host}" "
+        $(declare -f utils::retry)
+        kill -s SIGHUP \$(pidof etcd) && \
+        utils::retry 10 \"echo -n | openssl s_client -connect localhost:2379 2>&1 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | openssl x509 -text -noout | grep Not\"
+      "
+      check::exit_code "$?" "cert" "$host: restart etcd"
+      
+      command::exec "${host}" "
+        $(declare -f utils::retry)
+        kill -s SIGHUP \$(pidof kube-apiserver) && \
+        utils::retry 10 \"echo -n | openssl s_client -connect localhost:6443 2>&1 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | openssl x509 -text -noout | grep Not\"
+      "
+      check::exit_code "$?" "cert" "$host: restart kube-apiserver"
+      
+      command::exec "${host}" "
+        $(declare -f utils::retry)
+        kill -s SIGHUP \$(pidof kube-controller-manager) && \
+        utils::retry 10 \"echo -n | openssl s_client -connect localhost:10257 2>&1 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | openssl x509 -text -noout | grep Not\"
+       "
+      check::exit_code "$?" "cert" "$host: restart kube-controller-manager"
+      
+      command::exec "${host}" "
+        $(declare -f utils::retry)
+        kill -s SIGHUP \$(pidof kube-scheduler) && \
+        utils::retry 10 \"echo -n | openssl s_client -connect localhost:10259 2>&1 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | openssl x509 -text -noout | grep Not\"
+      "
+      check::exit_code "$?" "cert" "$host: restart kube-scheduler"
+    fi
+
+    log::info "[cert]" "get kubelet config"
+    command::exec "${MGMT_NODE}" "
+      kubeadm alpha kubeconfig user --org system:nodes --client-name system:node:${host}
+    "
+    local status="$?"
+    [[ "$status" == "0" ]] && kubelet_config="${COMMAND_OUTPUT}" || true
+    check::exit_code "$status" "cert" "get kubelet config"
+
+    if [[ "$kubelet_config" != "" ]]; then
+      log::info "[cert]" "copy kubelet config"
+      command::exec "${host}" "
+        cp /etc/kubernetes/kubelet.conf /etc/kubernetes/kubelet.conf_bak
+        echo '$(printf "%s" "${kubelet_config}" | sed 's#https://.*:#https://127.0.0.1:#g')' > /etc/kubernetes/kubelet.conf
+      "
+      check::exit_code "$?" "cert" "$host: copy kubelet config"
+
+      command::exec "${host}" "rm -rfv /var/lib/kubelet/pki/*"
+      check::exit_code "$?" "cert" "$host: delete kubelet pki files"
+
+      command::exec "${host}" "
+        $(declare -f utils::retry)
+        systemctl restart kubelet && \
+        utils::retry 10 \"echo -n | openssl s_client -connect localhost:10250 2>&1 | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' | openssl x509 -text -noout | grep Not\"
+      "
+      local status="$?"
+      check::exit_code "${status}" "cert" "$host: restart kubelet"
+      if [[ "${status}" == "0" ]]; then
+        sleep 5
+        command::exec "${MGMT_NODE}" "kubectl uncordon ${host}"
+        check::exit_code "$?" "cert" "uncordon ${host} node"
+      fi
+    fi
+  done
+}
+
+
+function cert::renew() {
+  # 证书续期
+ 
+  log::info "[cert]" "renew cluster cert"
+  cert::renew_node "master"
+  cert::renew_node "worker"
+ 
+  log::info "[cert]" "cluster status"
+  command::exec "${MGMT_NODE}" "
+    echo
+    kubectl get node
+    echo
+    kubeadm alpha certs check-expiration
+  "
+  [[ "$?" == "0" ]] && printf "${COMMAND_OUTPUT}" || true
+}
+
+
 function init::node() {
   # 初始化节点
   
@@ -857,7 +1025,7 @@ function init::node() {
 
     # 设置主机名
     command::exec "${host}" "
-      echo "$INIT_NODE $KUBE_APISERVER" >> /etc/hosts
+      echo "${MGMT_NODE} $KUBE_APISERVER" >> /etc/hosts
       hostnamectl set-hostname ${HOSTNAME_PREFIX}-master-node${index}
     "
     check::exit_code "$?" "init" "$host set hostname"
@@ -928,19 +1096,19 @@ function init::add_node() {
   init::upgrade_kernel
 
   local index=0
-  command::exec "${INIT_NODE}" "
+  command::exec "${MGMT_NODE}" "
     kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
   "
   [[ "$?" == "0" ]] && index="${COMMAND_OUTPUT}" || true
     
   index=$(( index + 1 ))
   
-  command::exec "${INIT_NODE}" "
+  command::exec "${MGMT_NODE}" "
     kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {.metadata.name }\\n{end}'
   "
   [[ "$?" == "0" ]] && local node_hosts="${COMMAND_OUTPUT}" || true
   
-  command::exec "${INIT_NODE}" "
+  command::exec "${MGMT_NODE}" "
     kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address } {end}' | awk '{print \$1}'
   "
   [[ "$?" == "0" ]] && INIT_NODE="${COMMAND_OUTPUT}" || true
@@ -961,7 +1129,7 @@ function init::add_node() {
 
     # 设置主机名和解析
     command::exec "${host}" "
-      echo "$INIT_NODE $KUBE_APISERVER" >> /etc/hosts
+      echo "${MGMT_NODE} $KUBE_APISERVER" >> /etc/hosts
       printf "\"$node_hosts\"" >> /etc/hosts
       echo "${host:-} ${HOSTNAME_PREFIX}-master-node${index}" >> /etc/hosts
       hostnamectl set-hostname ${HOSTNAME_PREFIX}-master-node${index}
@@ -972,7 +1140,7 @@ function init::add_node() {
    
   # worker 节点
   index=0
-  command::exec "${INIT_NODE}" "
+  command::exec "${MGMT_NODE}" "
     kubectl get node --selector='!node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
   "
   [[ "$?" == "0" ]] && index="${COMMAND_OUTPUT}" || true
@@ -1006,19 +1174,52 @@ function init::add_node() {
 function kubeadm::init() {
   # 集群初始化
   
-  log::info "[kubeadm init]" "kubeadm init on $INIT_NODE"
-  log::info "[kubeadm init]" "$INIT_NODE: set kubeadmcfg.yaml"
-  command::exec "${INIT_NODE}" "
-    cat << EOF > /tmp/kubeadmcfg.yaml
+  log::info "[kubeadm init]" "kubeadm init on ${MGMT_NODE}"
+  log::info "[kubeadm init]" "${MGMT_NODE}: set kubeadmcfg.yaml"
+  command::exec "${MGMT_NODE}" "
+    cat << EOF > /etc/kubernetes/kubeadmcfg.yaml
 ---
 apiVersion: kubeproxy.config.k8s.io/v1alpha1
 kind: KubeProxyConfiguration
 mode: ipvs
+ipvs:
+  minSyncPeriod: 5s
+  syncPeriod: 5s
+  # ipvs 负载策略
+  scheduler: 'wrr'
 
 ---
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
 maxPods: 1000
+# kubelet specific options here
+# 此配置保证了 kubelet 能在 swap 开启的情况下启动
+failSwapOn: false
+nodeStatusUpdateFrequency: 5s
+# 一些驱逐阀值，具体自行查文档修改
+evictionSoft:
+  'imagefs.available': '15%'
+  'memory.available': '512Mi'
+  'nodefs.available': '15%'
+  'nodefs.inodesFree': '10%'
+evictionSoftGracePeriod:
+  'imagefs.available': '3m'
+  'memory.available': '1m'
+  'nodefs.available': '3m'
+  'nodefs.inodesFree': '1m'
+evictionHard:
+  'imagefs.available': '10%'
+  'memory.available': '256Mi'
+  'nodefs.available': '10%'
+  'nodefs.inodesFree': '5%'
+evictionMaxPodGracePeriod: 30
+imageGCLowThresholdPercent: 70
+imageGCHighThresholdPercent: 80
+kubeReserved:
+  'cpu': '500m'
+  'memory': '512Mi'
+  'ephemeral-storage': '1Gi'
+rotateCertificates: true
 
 ---
 apiVersion: kubeadm.k8s.io/v1beta1
@@ -1035,6 +1236,9 @@ apiServer:
   - 127.0.0.1
   - $KUBE_APISERVER
 $(for h in $MASTER_NODES;do echo "  - $h";done)
+  extraArgs:
+    event-ttl: '720h'
+    service-node-port-range: '30000-50000'
   extraVolumes:
   - name: localtime
     hostPath: /etc/localtime
@@ -1044,6 +1248,12 @@ $(for h in $MASTER_NODES;do echo "  - $h";done)
 controllerManager:
   extraArgs:
     bind-address: 0.0.0.0
+    deployment-controller-sync-period: '10s'
+    node-monitor-grace-period: '20s'
+    pod-eviction-timeout: '2m'
+    terminated-pod-gc-threshold: '30'
+    experimental-cluster-signing-duration: 87600h
+    feature-gates: RotateKubeletServerCertificate=true
   extraVolumes:
   - hostPath: /etc/localtime
     mountPath: /etc/localtime
@@ -1061,25 +1271,33 @@ scheduler:
     pathType: File
 EOF
 "
-  check::exit_code "$?" "kubeadm init" "$INIT_NODE: set kubeadmcfg.yaml" "exit"
+  check::exit_code "$?" "kubeadm init" "${MGMT_NODE}: set kubeadmcfg.yaml" "exit"
   
-  log::info "[kubeadm init]" "$INIT_NODE: kubeadm init start."
-  command::exec "${INIT_NODE}" "kubeadm init --config=/tmp/kubeadmcfg.yaml --upload-certs"
-  check::exit_code "$?" "kubeadm init" "$INIT_NODE: kubeadm init" "exit"
+  log::info "[kubeadm init]" "${MGMT_NODE}: kubeadm init start."
+  command::exec "${MGMT_NODE}" "kubeadm init --config=/etc/kubernetes/kubeadmcfg.yaml --upload-certs"
+  check::exit_code "$?" "kubeadm init" "${MGMT_NODE}: kubeadm init" "exit"
   
   sleep 3
-
-  log::info "[kubeadm init]" "$INIT_NODE: set kube config."
-  command::exec "${INIT_NODE}" '
+  
+  log::info "[kubeadm init]" "${MGMT_NODE}: set kube config."
+  command::exec "${MGMT_NODE}" '
      mkdir -p $HOME/.kube
      sudo cp -f /etc/kubernetes/admin.conf $HOME/.kube/config
   '
-  check::exit_code "$?" "kubeadm init" "$INIT_NODE: set kube config"
+  check::exit_code "$?" "kubeadm init" "${MGMT_NODE}: set kube config"
   if [[ "$MASTER_NODES" == "127.0.0.1" ]]; then
-    log::info "[kubeadm init]" "$INIT_NODE: delete master taint"
+    log::info "[kubeadm init]" "${MGMT_NODE}: delete master taint"
     command::exec "127.0.0.1" "kubectl taint nodes --all node-role.kubernetes.io/master-"
-    check::exit_code "$?" "kubeadm init" "$INIT_NODE: delete master taint"
+    check::exit_code "$?" "kubeadm init" "${MGMT_NODE}: delete master taint"
   fi
+
+  command::exec "${MGMT_NODE}" "
+    kubectl create clusterrolebinding node-client-auto-approve-csr --clusterrole=system:certificates.k8s.io:certificatesigningrequests:nodeclient --user=kubelet-bootstrap
+    kubectl create clusterrolebinding node-client-auto-renew-crt --clusterrole=system:certificates.k8s.io:certificatesigningrequests:selfnodeclient --group=system:nodes
+    kubectl create clusterrolebinding node-server-auto-renew-crt --clusterrole=system:certificates.k8s.io:certificatesigningrequests:selfnodeserver --group=system:nodes
+  "
+  check::exit_code "$?" "kubeadm init" "Auto-Approve kubelet cert csr"
+
 }
 
 
@@ -1087,26 +1305,26 @@ function kubeadm::join() {
   # 加入集群
 
   log::info "[kubeadm join]" "master: get CACRT_HASH"
-  command::exec "${INIT_NODE}" "
+  command::exec "${MGMT_NODE}" "
     openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //'
   "
   [[ "$?" == "0" ]] && CACRT_HASH="${COMMAND_OUTPUT}" || true
   
   log::info "[kubeadm join]" "master: get INTI_CERTKEY"
-  command::exec "${INIT_NODE}" "
+  command::exec "${MGMT_NODE}" "
     kubeadm init phase upload-certs --upload-certs 2>> $LOG_FILE | tail -1
   "
   [[ "$?" == "0" ]] && INTI_CERTKEY="${COMMAND_OUTPUT}" || true
   
   log::info "[kubeadm join]" "master: get INIT_TOKEN"
-  command::exec "${INIT_NODE}" "
+  command::exec "${MGMT_NODE}" "
     kubeadm token create
   "
   [[ "$?" == "0" ]] && INIT_TOKEN="${COMMAND_OUTPUT}" || true
   
   for host in $MASTER_NODES
   do
-    [[ "$INIT_NODE" == "$host" ]] && continue || true
+    [[ "${MGMT_NODE}" == "$host" ]] && continue || true
     log::info "[kubeadm join]" "master $host join cluster."
     command::exec "${host}" "
       kubeadm join $KUBE_APISERVER:6443 --token ${INIT_TOKEN:-} --discovery-token-ca-cert-hash sha256:${CACRT_HASH:-} --control-plane --certificate-key ${INTI_CERTKEY:-}
@@ -1121,7 +1339,7 @@ function kubeadm::join() {
     check::exit_code "$?" "kubeadm join" "$host: set kube config"
     
     command::exec "${host}" "
-      sed -i 's#$INIT_NODE $KUBE_APISERVER#127.0.0.1 $KUBE_APISERVER#g' /etc/hosts
+      sed -i 's#${MGMT_NODE} $KUBE_APISERVER#127.0.0.1 $KUBE_APISERVER#g' /etc/hosts
     "
   done
 
@@ -1135,7 +1353,7 @@ function kubeadm::join() {
     check::exit_code "$?" "kubeadm join" "worker $host join cluster"
   
     log::info "[kubeadm join]" "set $host worker node role."
-    command::exec "${INIT_NODE}" "
+    command::exec "${MGMT_NODE}" "
       kubectl get node -o wide | grep "$host" | awk '{print \"kubectl label node \" \$1 \" node-role.kubernetes.io/worker= --overwrite\" }' | bash
     "
     check::exit_code "$?" "kubeadm join" "set $host worker node role"
@@ -1153,7 +1371,7 @@ function kube::wait() {
   local selector=$4
 
   log::info "[waiting]" "waiting $app"
-  command::exec "${INIT_NODE}" "
+  command::exec "${MGMT_NODE}" "
     kubectl wait --namespace "$namespace" \
     --for=condition=ready ${resource} \
     --selector=$selector \
@@ -1170,8 +1388,8 @@ function kube::apply() {
   [ -f "$file" ] && local manifest=$(cat $file) || local manifest="${2:-}"
 
   log::info "[apply]" "$file"
-  command::exec "${INIT_NODE}" "
-    cat <<EOF | kubectl apply -f -
+  command::exec "${MGMT_NODE}" "
+    cat <<EOF | kubectl apply --wait=true --timeout=10s -f -
 $(printf "%s" "$manifest")
 EOF
   "
@@ -1184,7 +1402,7 @@ function kube::status() {
   
   sleep 5
   log::info "[cluster]" "cluster status"
-  command::exec "${INIT_NODE}" "
+  command::exec "${MGMT_NODE}" "
      echo
      kubectl get node -o wide
      echo
@@ -1201,7 +1419,7 @@ function config::haproxy_backend() {
   local action_cmd=""
   
   if [[ "$MASTER_NODES" != "" && "$MASTER_NODES" != "127.0.0.1" ]]; then
-    command::exec "${INIT_NODE}" "
+    command::exec "${MGMT_NODE}" "
       kubectl get node --selector='!node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].status.addresses[?(@.type==\"InternalIP\")].address}'
     "
     [[ "$?" == "0" ]] && local work_nodes="${COMMAND_OUTPUT}"
@@ -1234,12 +1452,12 @@ function get::ingress_conn(){
   # 获取ingress连接地址
 
   local port=${1:-80}
-  command::exec "${INIT_NODE}" "
+  command::exec "${MGMT_NODE}" "
     kubectl get node --selector='node-role.kubernetes.io/worker' -o jsonpath='{range.items[*]}{ .status.addresses[?(@.type==\"InternalIP\")].address } {end}' | awk '{print \$1}'
   "
   [[ "$?" == "0" ]] && local node_ip="${COMMAND_OUTPUT}" || local node_ip="nodeIP"
 
-  command::exec "${INIT_NODE}" "
+  command::exec "${MGMT_NODE}" "
     kubectl get svc --all-namespaces -o go-template=\"{{range .items}}{{if eq .metadata.name \\\"ingress-${KUBE_INGRESS}-controller\\\"}}{{range.spec.ports}}{{if eq .port ${port}}}{{.nodePort}}{{end}}{{end}}{{end}}{{end}}\"
   "
   [[ "$?" == "0" ]] && local node_port="${COMMAND_OUTPUT}" || local node_port="nodePort"
@@ -1263,6 +1481,7 @@ function add::ingress() {
     sed -i 's#@sha256:.*$##g'  ${TMP_DIR}/ingress-nginx.yml
     kube::apply "${TMP_DIR}/ingress-nginx.yml"
     
+    sleep 2
     kube::wait "ingress-nginx" "ingress-nginx" "pod" "app.kubernetes.io/component=controller"
     add_ingress_demo=1
 
@@ -1563,7 +1782,7 @@ function add::network() {
 
   elif [[ "$KUBE_NETWORK" == "calico" ]]; then
     log::info "[network]" "download calico manifests"
-    command::exec "${INIT_NODE}" "
+    command::exec "${MGMT_NODE}" "
       wget https://docs.projectcalico.org/manifests/calico.yaml -O /tmp/calico.yml
       wget https://docs.projectcalico.org/manifests/calicoctl.yaml -O /tmp/calicoctl.yaml
       sed -i "s#:v.*#:v${CALICO_VERSION}#g" /tmp/calico.yml
@@ -1596,7 +1815,7 @@ function add::monitor() {
   
   if [[ "$KUBE_MONITOR" == "prometheus" ]]; then
     log::info "[monitor]" "download prometheus manifests"
-    command::exec "${INIT_NODE}" "
+    command::exec "${MGMT_NODE}" "
       wget https://gh.lework.workers.dev/https://github.com/prometheus-operator/kube-prometheus/archive/v${KUBE_PROMETHEUS_VERSION}.zip -O /tmp/prometheus.zip
       command -v unzip 2>/dev/null || yum install -y unzip
       unzip -o /tmp/prometheus.zip -d /tmp/
@@ -1604,7 +1823,7 @@ function add::monitor() {
     check::exit_code "$?" "monitor" "download prometheus"
    
     log::info "[monitor]" "apply prometheus manifests"
-    command::exec "${INIT_NODE}" "
+    command::exec "${MGMT_NODE}" "
       cd /tmp/kube-prometheus-${KUBE_PROMETHEUS_VERSION} \
       && kubectl apply -f manifests/setup/ \
       && until kubectl get servicemonitors --all-namespaces ; do date; sleep 1; echo ''; done \
@@ -1613,7 +1832,7 @@ function add::monitor() {
     check::exit_code "$?" "apply" "add prometheus"
 
     log::info "[monitor]" "set controller-manager and scheduler prometheus discovery service"
-    command::exec "${INIT_NODE}" "
+    command::exec "${MGMT_NODE}" "
       cat <<EOF | kubectl --validate=false apply -f -
 ---
 apiVersion: v1
@@ -1656,7 +1875,7 @@ EOF
     check::exit_code "$?" "apply" "set controller-manager and scheduler prometheus discovery"
 
     log::info "[monitor]" "add prometheus ingress"
-    command::exec "${INIT_NODE}" "
+    command::exec "${MGMT_NODE}" "
       cat <<EOF | kubectl --validate=false apply -f -
 ---
 apiVersion: extensions/v1beta1
@@ -1729,7 +1948,7 @@ function add::log() {
 
   if [[ "$KUBE_LOG" == "elasticsearch" ]]; then
     log::info "[log]" "add elasticsearch"
-    command::exec "${INIT_NODE}" """
+    command::exec "${MGMT_NODE}" """
       cat <<EOF | kubectl apply -f -
 ---
 kind: Namespace
@@ -2019,7 +2238,7 @@ function add::storage() {
 
     log::info "[storage]" "add rook"
     log::info "[storage]" "download rook manifests"
-    command::exec "${INIT_NODE}" """
+    command::exec "${MGMT_NODE}" """
       wget https://gh.lework.workers.dev/https://github.com/rook/rook/archive/v${ROOK_VERSION}.zip  -O /tmp/rook-${ROOK_VERSION}.zip
       command -v unzip 2>/dev/null || yum install -y unzip
       unzip -o /tmp/rook-${ROOK_VERSION}.zip -d /tmp/
@@ -2027,14 +2246,14 @@ function add::storage() {
     check::exit_code "$?" "storage" "download rook manifests"
 
     log::info "[storage]" "add rook operator"
-    command::exec "${INIT_NODE}" """
+    command::exec "${MGMT_NODE}" """
       cd /tmp/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/ \
       && kubectl apply -f common.yaml -f operator.yaml
     """
     check::exit_code "$?" "apply" "add rook operator"
 
     log::info "[storage]" "create ceph cluster"
-    command::exec "${INIT_NODE}" """
+    command::exec "${MGMT_NODE}" """
       cd /tmp/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/ \
       && kubectl apply -f cluster.yaml
 """
@@ -2056,7 +2275,7 @@ function add::ui() {
       wget https://cdn.jsdelivr.net/gh/kubernetes/dashboard@v${KUBERNETES_DASHBOARD_VERSION}/aio/deploy/recommended.yaml -O ${TMP_DIR}/kubernetes-dashboard.yml  >> $LOG_FILE 2>&1 || true
     kube::apply "${TMP_DIR}/kubernetes-dashboard.yml"
 
-    command::exec "${INIT_NODE}" """
+    command::exec "${MGMT_NODE}" """
       cat <<EOF | kubectl apply -f -
 apiVersion: extensions/v1beta1
 kind: Ingress
@@ -2110,13 +2329,13 @@ EOF
       local conn=$(get::ingress_conn "443")
       log::access "[ingress]" "curl -H 'Host:kubernetes-dashboard.cluster.local' http://${conn}"
 
-      command::exec "${INIT_NODE}" """
+      command::exec "${MGMT_NODE}" """
         kubectl create serviceaccount kubernetes-dashboard-admin-sa -n kubernetes-dashboard
         kubectl create clusterrolebinding kubernetes-dashboard-admin-sa --clusterrole=cluster-admin --serviceaccount=kubernetes-dashboard:kubernetes-dashboard-admin-sa -n kubernetes-dashboard
       """
       s="$?"
       check::exit_code "$s" "ui" "create kubernetes dashboard admin service account"
-      command::exec "${INIT_NODE}" """
+      command::exec "${MGMT_NODE}" """
         kubectl describe secrets \$(kubectl describe sa kubernetes-dashboard-admin-sa -n kubernetes-dashboard | awk '/Tokens/ {print \$2}') -n kubernetes-dashboard | awk '/token:/{print \$2}'
       """
       s="$?"
@@ -2194,7 +2413,7 @@ function reset::node() {
     yum remove -y kubeadm kubelet kubectl
     [ -f /etc/haproxy/haproxy.cfg ] && systemctl stop haproxy
     sed -i -e \"/$KUBE_APISERVER/d\" -e '/-worker-/d' -e '/-master-/d' /etc/hosts
-    sed -i '/## Kainstall managed start/,/## Kainstall managed end/d' /etc/security/limits.conf /etc/systemd/system.conf /etc/bashrc
+    sed -i '/## Kainstall managed start/,/## Kainstall managed end/d' /etc/security/limits.conf /etc/systemd/system.conf /etc/bashrc /etc/rc.local
     iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X
     [ -d /var/lib/kubelet ] && find /var/lib/kubelet | xargs -n 1 findmnt -n -t tmpfs -o TARGET -T | uniq | xargs -r umount -v
     rm -rf /etc/kubernetes/* /var/lib/etcd/* \$HOME/.kube /etc/cni/net.d/* /var/lib/elasticsearch/*
@@ -2214,7 +2433,7 @@ function reset::cluster() {
   
   local all_node="${MASTER_NODES} ${WORKER_NODES}"
   
-  command::exec "${INIT_NODE}" "
+  command::exec "${MGMT_NODE}" "
     kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {end}'
   "
   [[ "$?" == "0" ]] && all_node="${all_node} ${COMMAND_OUTPUT}" || true
@@ -2304,7 +2523,7 @@ function offline::cluster() {
 function init::cluster() {
   # 初始化集群
 
-  INIT_NODE=$(echo ${MASTER_NODES} | awk '{print $1}')
+  MGMT_NODE=$(echo ${MASTER_NODES} | awk '{print $1}')
 
   # 加载离线包
   [[ "${OFFLINE_TAG:-}" == "1" ]] && offline::cluster || true
@@ -2362,7 +2581,7 @@ function del::node() {
   do
     log::info "[del]" "node $host"
 
-    command::exec "${INIT_NODE}" "
+    command::exec "${MGMT_NODE}" "
       kubectl get node -o wide | grep $host | awk '{print \$1}'
     "
     [[ "$?" == "0" ]] && local node_name="${COMMAND_OUTPUT}" || true
@@ -2371,11 +2590,11 @@ function del::node() {
       log::warning "[del]" "node $host not found."
     else
       log::info "[del]" "drain $host"
-      command::exec "${INIT_NODE}" "kubectl drain $node_name --force --ignore-daemonsets --delete-local-data"
+      command::exec "${MGMT_NODE}" "kubectl drain $node_name --force --ignore-daemonsets --delete-local-data"
       check::exit_code "$?" "del" "$host: drain"
 
       log::info "[del]" "delete node $host"
-      command::exec "${INIT_NODE}" "kubectl delete node $node_name"
+      command::exec "${MGMT_NODE}" "kubectl delete node $node_name"
       check::exit_code "$?" "del" "$host: delete"
       sleep 3
     fi
@@ -2394,7 +2613,7 @@ function upgrade::cluster() {
 
   if [[ "${KUBE_VERSION}" != "latest" ]]; then
     local local_version=""
-    command::exec "${INIT_NODE}" "kubeadm version -o short"
+    command::exec "${MGMT_NODE}" "kubeadm version -o short"
     [[ "$?" == "0" ]] && local_version="${COMMAND_OUTPUT#v}" || true
     if [[ "${KUBE_VERSION}" == "${local_version}" ]];then
       log::warning "[check]" "The specified version(${KUBE_VERSION}) is consistent with the local version(${local_version})!"
@@ -2407,7 +2626,7 @@ function upgrade::cluster() {
     fi
 
     local stable_version="2"
-    command::exec "${INIT_NODE}" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"
+    command::exec "${MGMT_NODE}" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"
     [[ "$?" == "0" ]] && stable_version="${COMMAND_OUTPUT#v}" || true
     if [[ $(version_to_number $KUBE_VERSION) > $(version_to_number ${stable_version}) ]];then
       log::warning "[check]" "The specified version($KUBE_VERSION) is more than the stable version(${stable_version})!"
@@ -2416,7 +2635,7 @@ function upgrade::cluster() {
   fi
 
   local node_hosts=""
-  command::exec "${INIT_NODE}" "
+  command::exec "${MGMT_NODE}" "
     kubectl get node -o jsonpath='{range.items[*]}{.metadata.name } {end}'
   "
   [[ "$?" == "0" ]] && node_hosts="${COMMAND_OUTPUT}" || true
@@ -2425,7 +2644,7 @@ function upgrade::cluster() {
   for host in ${node_hosts}
   do
     log::info "[upgrade]" "node: $host"
-    command::exec "${INIT_NODE}" "kubectl drain ${host} --ignore-daemonsets --delete-local-data"
+    command::exec "${MGMT_NODE}" "kubectl drain ${host} --ignore-daemonsets --delete-local-data"
     check::exit_code "$?" "upgrade" "drain ${host} node" "exit"
     sleep 5
 
@@ -2438,10 +2657,10 @@ function upgrade::cluster() {
       check::exit_code "$?" "upgrade" "upgrade ${host} node"
     fi
 
-    command::exec "${INIT_NODE}" "kubectl wait --for=condition=Ready node/${host} --timeout=120s"
+    command::exec "${MGMT_NODE}" "kubectl wait --for=condition=Ready node/${host} --timeout=120s"
     check::exit_code "$?" "upgrade" "${host} ready"
     sleep 5
-    command::exec "${INIT_NODE}" "kubectl uncordon ${host}"
+    command::exec "${MGMT_NODE}" "kubectl uncordon ${host}"
     check::exit_code "$?" "upgrade" "uncordon ${host} node"
     sleep 5
   done
@@ -2461,11 +2680,12 @@ Usage:
   $(basename $0) [command]
 
 Available Commands:
-  init            init Kubernetes cluster.
-  reset           reset Kubernetes cluster.
-  add             add nodes to the cluster.
-  del             remove node from the cluster.
+  init            Init Kubernetes cluster.
+  reset           Reset Kubernetes cluster.
+  add             Add nodes to the cluster.
+  del             Remove node from the cluster.
   upgrade         Upgrading kubeadm clusters.
+  renew-cert      Renew all available certificates.
 
 Flag:
   -m,--master          master node, default: ''
@@ -2513,6 +2733,7 @@ Example:
   --password 123456
  
   [other]
+  $0 renew-cert
   $0 upgrade --version 1.19.2
   $0 add --ingress traefik
   $0 add --monitor prometheus
@@ -2543,6 +2764,8 @@ while [ "${1:-}" != "" ]; do
     del )                   DEL_TAG=1
                             ;;
     upgrade )               UPGRADE_TAG=1
+                            ;;
+    renew-cert )            RENEW_CERT_TAG=1
                             ;;
     -m | --master )         shift
                             MASTER_NODES=${1:-$MASTER_NODES}
@@ -2608,7 +2831,7 @@ WORKER_NODES=$(echo ${WORKER_NODES} | tr ',' ' ')
 # 预检
 check::preflight
 
-# 启动
+# 动作
 if [[ "x${INIT_TAG:-}" == "x1" ]]; then
   [[ "$MASTER_NODES" == "" ]] && MASTER_NODES="127.0.0.1" || true
   init::cluster
@@ -2627,6 +2850,8 @@ elif [[ "x${RESET_TAG:-}" == "x1" ]]; then
   reset::cluster
 elif [[ "x${UPGRADE_TAG:-}" == "x1" ]]; then
   upgrade::cluster
+elif [[ "x${RENEW_CERT_TAG:-}" == "x1" ]]; then
+  cert::renew
 else
   help::usage
 fi

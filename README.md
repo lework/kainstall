@@ -36,16 +36,17 @@ MEM: `4G`
 ## 功能
 
 - 服务器初始化。
-  - 关闭`selinux`
-  - 关闭`swap`
-  - 关闭`firewalld`
-  - 配置`epel`源
-  - 修改`limits`
+  - 关闭 `selinux`
+  - 关闭 `swap`
+  - 关闭 `firewalld`
+  - 关闭大内存页
+  - 配置 `epel` 源
+  - 修改 `limits`
   - 配置内核参数
-  - 配置`history` 记录
-  - 配置`journal` 日志
-  - 配置`chrony`时间同步
-  - 安装`ipvs`模块
+  - 配置 `history` 记录
+  - 配置 `journal` 日志
+  - 配置 `chrony`时间同步
+  - 安装 `ipvs` 模块
   - 更新内核
 - 安装`docker`, `kube`组件。
 - 初始化`kubernetes`集群,以及增加或删除节点。
@@ -56,6 +57,7 @@ MEM: `4G`
 - 安装`storage`组件，可选`rook`。
 - 安装`web ui`组件，可选`dashboard`。
 - 升级到`kubernetes`指定版本。
+- 更新证书。
 - 添加运维操作，如备份etcd快照。
 - 支持**离线部署**。
 
@@ -100,11 +102,12 @@ Usage:
   kainstall.sh [command]
 
 Available Commands:
-  init            init Kubernetes cluster.
-  reset           reset Kubernetes cluster.
-  add             add nodes to the cluster.
-  del             remove node from the cluster.
+  init            Init Kubernetes cluster.
+  reset           Reset Kubernetes cluster.
+  add             Add nodes to the cluster.
+  del             Remove node from the cluster.
   upgrade         Upgrading kubeadm clusters.
+  renew-cert      Renew all available certificates.
 
 Flag:
   -m,--master          master node, default: ''
@@ -121,7 +124,7 @@ Flag:
   -s,--storage         cluster storage, choose: [rook]
   -U,--upgrade-kernel  upgrade kernel
   -of,--offline-file   specify the offline package file to load
- 
+
 Example:
   [cluster node]
   kainstall.sh init \
@@ -152,6 +155,7 @@ Example:
   --password 123456
  
   [other]
+  kainstall.sh renew-cert
   kainstall.sh upgrade --version 1.19.2
   kainstall.sh add --ingress traefik
   kainstall.sh add --monitor prometheus
@@ -240,7 +244,10 @@ bash kainstall.sh add --log elasticsearch
 bash kainstall.sh add --storage rook
 
 # 升级版本
-kainstall.sh upgrade --version 1.19.2
+bash kainstall.sh upgrade --version 1.19.2
+
+# 重新颁发证书
+bash kainstall.sh renew-cert
 ```
 
 ### 离线部署
