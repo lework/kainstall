@@ -2650,11 +2650,11 @@ function upgrade::cluster() {
 
     if [[ ${plan} == "0" ]]; then
       command::exec "${host}" "$(declare -f script::upgrage_kube); script::upgrage_kube 'init' '$KUBE_VERSION'"
-      check::exit_code "$?" "upgrade" "plan and upgrade cluster on ${host}"
+      check::exit_code "$?" "upgrade" "plan and upgrade cluster on ${host}" "exit"
       plan=1
     else
       command::exec "${host}" "$(declare -f script::upgrage_kube); script::upgrage_kube 'node' '$KUBE_VERSION'"
-      check::exit_code "$?" "upgrade" "upgrade ${host} node"
+      check::exit_code "$?" "upgrade" "upgrade ${host} node" "exit"
     fi
 
     command::exec "${MGMT_NODE}" "kubectl wait --for=condition=Ready node/${host} --timeout=120s"
