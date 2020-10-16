@@ -1,13 +1,14 @@
 # kainstall  =  kubeadm install kubernetes
-基于 kubeadm 一键部署 kubernetes 集群
+
+使用 shell 脚本, 基于 kubeadm 一键部署 kubernetes 集群
 
 
 
 ## 为什么？
 
-**为什么要搞这个？ansible playbook 不好么？**
+**为什么要搞这个？Ansible PlayBook 不好么？**
 
-**因为懒**，ansible playbook编排是非常给力的，不过需要安装python和ansible。**因为懒**，我想要个更简单的方式来快速部署一个分布式的 kubernetes ha集群， 使用 shell 脚本可以不借助外力直接在服务器上运行，省时省力。
+**因为懒**，Ansible PlayBook 编排是非常给力的，不过需要安装 Python 和 Ansible, 且需要下载多个 yaml 文件 。**因为懒**，我想要个更简单的方式来**快速部署**一个分布式的 **Kubernetes HA** 集群， 使用 **shell** 脚本可以不借助外力直接在服务器上运行，省时省力。 并且 shell 脚本只有一个文件，文件大小**不到 100 KB**，非常小巧，可以实现一条命令安装集群的超快体验，而且配合**离线安装包**，可以在不联网的环境下安装集群，这体验真的**非常爽**啊。
 
 
 
@@ -178,6 +179,19 @@ ACCESS Summary:
 
 ```bash
 bash kainstall.sh init \
+  --master 192.168.77.130,192.168.77.131,192.168.77.132 \
+  --worker 192.168.77.133,192.168.77.134 \
+  --user root \
+  --password 123456 \
+  --port 22 \
+  --version 1.19.2
+```
+
+还可以使用一键安装方式, 连下载都省略了。
+
+```bash
+bash -c "$(curl -sSL https://cdn.jsdelivr.net/gh/lework/kainstall/kainstall.sh)"  \
+  - init \
   --master 192.168.77.130,192.168.77.131,192.168.77.132 \
   --worker 192.168.77.133,192.168.77.134 \
   --user root \
