@@ -14,7 +14,7 @@
 
 ## 要求
 
-OS: `centos 7.x`, `centos 8.x`
+OS: `centos 7.x x64` , `centos 8.x x64`
 
 CPU: `2C`
 
@@ -64,19 +64,20 @@ MEM: `4G`
 
 ## 默认版本
 
-| 软件                 | 默认版本 |
-| -------------------- | -------- |
-| docker               | latest   |
-| kube                 | latest   |
-| fannel               | 0.12.0   |
-| metrics server       | 0.3.7    |
-| ingress nginx        | 0.35.0   |
-| traefik              | 2.3.1    |
-| calico               | 3.16.1   |
-| kube_prometheus      | 0.6.0    |
-| elasticsearch        | 7.9.2    |
-| rook                 | 1.4.5    |
-| kubernetes_dashboard | 2.0.4    |
+
+| 软件                                             | kainstall 默认版本 | 软件最新版本                                                 |
+| ------------------------------------------------ | ------------------ | ------------------------------------------------------------ |
+| [docker-ce](https://github.com/docker/docker-ce) | latest             | ![docker-ce release](https://img.shields.io/github/v/release/docker/docker-ce?sort=semver) |
+| [kubernetes](https://github.com/kubernetes/kubernetes) | latest             | ![kubernetes release](https://img.shields.io/github/v/release/kubernetes/kubernetes?sort=semver) |
+| [flannel](https://github.com/coreos/flannel) | 0.12.0            | ![flannel release](https://img.shields.io/github/v/release/coreos/flannel) |
+| [metrics server](https://github.com/kubernetes-sigs/metrics-server) | 0.3.7             | ![metrics-server release](https://img.shields.io/github/v/release/kubernetes-sigs/metrics-server) |
+| [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.35.0            | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
+| [traefik](https://github.com/traefik/traefik) | 2.3.1             | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
+| [calico](https://github.com/projectcalico/calico)                                           | 3.16.1            | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
+| [kube_prometheus](https://github.com/prometheus-operator/kube-prometheus) | 0.6.0             | ![kube-prometheus release](https://img.shields.io/github/v/release/prometheus-operator/kube-prometheus) |
+| [elasticsearch](https://github.com/elastic/elasticsearch) | 7.9.2             | ![elasticsearch release](https://img.shields.io/github/v/release/elastic/elasticsearch?sort=semver) |
+| [rook](https://github.com/rook/rook) | 1.4.5 | ![rook release](https://img.shields.io/github/v/release/rook/rook?sort=semver) |
+| [kubernetes_dashboard](https://github.com/kubernetes/dashboard) | 2.0.4             | ![kubernetes dashboard release](https://img.shields.io/github/v/release/kubernetes/dashboard?sort=semver) |
 
 除 **kube组件** 版本可以通过参数(`--version`) 指定外，其他的软件版本需在脚本中指定。
 
@@ -84,7 +85,7 @@ MEM: `4G`
 
 ## 使用
 
-> 详细介绍请见：https://lework.github.io/2020/09/26/kainstall
+> 详细介绍请见：[https://lework.github.io/2020/09/26/kainstall](https://lework.github.io/2020/09/26/kainstall)
 
 ### 下载脚本
 
@@ -133,7 +134,7 @@ Example:
   --worker 192.168.77.133,192.168.77.134,192.168.77.135 \
   --user root \
   --password 123456 \
-  --version 1.19.2
+  --version 1.19.3
 
   [cluster node]
   kainstall.sh reset \
@@ -146,7 +147,7 @@ Example:
   --worker 192.168.77.143,192.168.77.144 \
   --user root \
   --password 123456 \
-  --version 1.19.2
+  --version 1.19.3
 
   [del node]
   kainstall.sh del \
@@ -157,7 +158,7 @@ Example:
  
   [other]
   kainstall.sh renew-cert
-  kainstall.sh upgrade --version 1.19.2
+  kainstall.sh upgrade --version 1.19.3
   kainstall.sh add --ingress traefik
   kainstall.sh add --monitor prometheus
   kainstall.sh add --log elasticsearch
@@ -184,7 +185,7 @@ bash kainstall.sh init \
   --user root \
   --password 123456 \
   --port 22 \
-  --version 1.19.2
+  --version 1.19.3
 ```
 
 还可以使用一键安装方式, 连下载都省略了。
@@ -197,7 +198,7 @@ bash -c "$(curl -sSL https://cdn.jsdelivr.net/gh/lework/kainstall/kainstall.sh)"
   --user root \
   --password 123456 \
   --port 22 \
-  --version 1.19.2
+  --version 1.19.3
 ```
 
 ### 增加节点
@@ -258,7 +259,7 @@ bash kainstall.sh add --log elasticsearch
 bash kainstall.sh add --storage rook
 
 # 升级版本
-bash kainstall.sh upgrade --version 1.19.2
+bash kainstall.sh upgrade --version 1.19.3
 
 # 重新颁发证书
 bash kainstall.sh renew-cert
@@ -270,12 +271,13 @@ bash kainstall.sh renew-cert
 
 脚本执行的宿主机上，需要安装 `tar` 命令，用于解压离线包。
 
+> 详细部署请见: [https://lework.github.io/2020/10/18/kainstall-offline/](https://lework.github.io/2020/10/18/kainstall-offline/)
 
 
 **下载指定版本的离线包**
 
 ```bash
-wget http://kainstall.oss-cn-shanghai.aliyuncs.com/1.19.2/centos7.tgz
+wget http://kainstall.oss-cn-shanghai.aliyuncs.com/1.19.3/centos7.tgz
 ```
 > 离线包信息，见 [kainstall-offline](https://github.com/lework/kainstall-offline) 仓库
 
@@ -301,3 +303,7 @@ bash kainstall.sh add \
   --worker 192.168.77.136 \
   --offline-file centos7.tgz
 ```
+
+## License
+
+MIT

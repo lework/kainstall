@@ -2,7 +2,7 @@
 ###################################################################
 #Script Name	: kainstall.sh
 #Description	: Install kubernetes cluster using kubeadm.
-#Update Date    : 2020-10-11
+#Create Date    : 2020-09-17
 #Author       	: lework
 #Email         	: lework@yeah.net
 ###################################################################
@@ -65,7 +65,7 @@ ERROR_INFO="\n\033[31mERROR Summary: \033[0m\n  "
 ACCESS_INFO="\n\033[32mACCESS Summary: \033[0m\n  "
 COMMAND_OUTPUT=""
 SCRIPT_PARAMETER="$*"
-# http://kainstall.oss-cn-shanghai.aliyuncs.com/1.19.2/centos7.tgz
+# http://kainstall.oss-cn-shanghai.aliyuncs.com/1.19.3/centos7.tgz
 OFFLINE_FILE=""
 
 
@@ -194,7 +194,7 @@ function script::init_node() {
   
   yum install -y epel-release
   
-  [ -f /etc/yum.repos.d/CentOS-Base.repo ] && sed -e 's!^mirrorlist=!#mirrorlist=!g' \
+  [ -f /etc/yum.repos.d/epel.repo ] && sed -e 's!^mirrorlist=!#mirrorlist=!g' \
     -e 's!^metalink=!#metalink=!g' \
     -e 's!^#baseurl=!baseurl=!g' \
     -e 's!//download\.fedoraproject\.org/pub!//mirrors.aliyun.com!g' \
@@ -578,6 +578,7 @@ function script::upgrage_kube() {
   local version="-${2:-latest}"
   version="${version#-latest}"
 
+  set -e
   echo '[install] kubeadm'
   kubeadm version
   yum install -y kubeadm${version} --disableexcludes=kubernetes
@@ -888,13 +889,13 @@ function init::upgrade_kernel() {
   
   for host in $MASTER_NODES $WORKER_NODES
   do
-    command::exec "${host}" "bash -c 'sleep 10 && reboot' &>/dev/null &"
-    check::exit_code "$?" "init" "$host: Wait for 10s to restart"
+    command::exec "${host}" "bash -c 'sleep 15 && reboot' &>/dev/null &"
+    check::exit_code "$?" "init" "$host: Wait for 15s to restart"
   done
 
   log::info "[notice]" "Please execute the command again!" 
-  local cmd="$(echo ${SCRIPT_PARAMETER} | sed -e 's# --offline-file .*##g' -e 's# --upgrade-kernel##g')"
-  log::access "[cmd]" "bash $0 ${cmd}"
+  local cmd="$(echo ${SCRIPT_PARAMETER} | sed -e 's# --upgrade-kernel##g')"
+  log::access "[command]" "bash $0 ${cmd}"
   exit 0
 }
 
@@ -1111,7 +1112,7 @@ function init::add_node() {
   command::exec "${MGMT_NODE}" "
     kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address } {end}' | awk '{print \$1}'
   "
-  [[ "$?" == "0" ]] && INIT_NODE="${COMMAND_OUTPUT}" || true
+  [[ "$?" == "0" ]] && MGMT_NODE="${COMMAND_OUTPUT}" || true
 
   # master节点
   for host in $MASTER_NODES
@@ -1363,7 +1364,7 @@ function kubeadm::join() {
 
 
 function kube::wait() {
-  # 等待pod完成
+  # 等待资源完成
 
   local app=$1
   local namespace=$2
@@ -2467,38 +2468,40 @@ function offline::load() {
     command::exec "${host}"  "[[ ! -d ${offline_dir} ]] && mkdir -p ${offline_dir} || true"
     check::exit_code "$?" "offline" "$host: mkdir offline dir"
 
-    log::info "[offline]" "${role} ${host}: copy offline file"
-    command::scp "${host}" "${TMP_DIR}/rpms/kubeadm/*" ${offline_dir}
-    check::exit_code "$?" "offline" "scp kube file to $host"
-    command::scp "${host}" "${TMP_DIR}/rpms/all/*" ${offline_dir}
-    check::exit_code "$?" "offline" "scp all file to $host"
-
-    if [[ "${role}" == "worker" ]]; then
-      command::scp "${host}" "${TMP_DIR}/rpms/worker/*" ${offline_dir}
-      check::exit_code "$?" "offline" "scp worker file to $host"
-    fi 
-
     if [[ "x${UPGRADE_KERNEL_TAG:-}" == "x1" ]]; then
       command::scp "${host}" "${TMP_DIR}/rpms/kernel/*" ${offline_dir}
       check::exit_code "$?" "offline" "scp kernel file to $host"
+    else
+      log::info "[offline]" "${role} ${host}: copy offline file"
+      command::scp "${host}" "${TMP_DIR}/rpms/kubeadm/*" ${offline_dir}
+      check::exit_code "$?" "offline" "scp kube file to $host"
+      command::scp "${host}" "${TMP_DIR}/rpms/all/*" ${offline_dir}
+      check::exit_code "$?" "offline" "scp all file to $host"
+
+      if [[ "${role}" == "worker" ]]; then
+        command::scp "${host}" "${TMP_DIR}/rpms/worker/*" ${offline_dir}
+        check::exit_code "$?" "offline" "scp worker file to $host"
+      fi 
+
+      command::scp "${host}" ${TMP_DIR}/images/${role}.tgz ${offline_dir}
+      check::exit_code "$?" "offline" "scp ${role} images to $host"
+      command::scp "${host}" ${TMP_DIR}/images/all.tgz ${offline_dir}
+      check::exit_code "$?" "offline" "scp all images to $host"
     fi
 
-    command::scp "${host}" ${TMP_DIR}/images/${role}.tgz ${offline_dir}
-    check::exit_code "$?" "offline" "scp ${role} images to $host"
-    command::scp "${host}" ${TMP_DIR}/images/all.tgz ${offline_dir}
-    check::exit_code "$?" "offline" "scp all images to $host"
     
     log::info "[offline]" "${role} ${host}: install package"
     command::exec "${host}" "yum localinstall -y --disablerepo=* --skip-broken ${offline_dir}/*.rpm"
     check::exit_code "$?" "offline" "${role} ${host}: install package"
-
-    command::exec "${host}" "
-      systemctl start docker && \
-      cd ${offline_dir}/ && \
-      gzip -d -c ${1}.tgz | docker load && gzip -d -c all.tgz | docker load
-    "
-    check::exit_code "$?" "offline" "$host: load images"	
-
+  
+    if [[ "x${UPGRADE_KERNEL_TAG:-}" != "x1" ]]; then
+      command::exec "${host}" "
+        systemctl start docker && \
+        cd ${offline_dir}/ && \
+        gzip -d -c ${1}.tgz | docker load && gzip -d -c all.tgz | docker load
+      "
+      check::exit_code "$?" "offline" "$host: load images"	
+    fi
     command::exec "${host}" "rm -rf ${offline_dir:-/tmp/abc}"
     check::exit_code "$?" "offline" "$host: clean offline file"	
   done
@@ -2516,7 +2519,6 @@ function offline::cluster() {
  
   offline::load "master"
   offline::load "worker"
-  
 }
 
 
@@ -2710,7 +2712,7 @@ Example:
   --worker 192.168.77.133,192.168.77.134,192.168.77.135 \\
   --user root \\
   --password 123456 \\
-  --version 1.19.2
+  --version 1.19.3
 
   [cluster node]
   $0 reset \\
@@ -2723,7 +2725,7 @@ Example:
   --worker 192.168.77.143,192.168.77.144 \\
   --user root \\
   --password 123456 \\
-  --version 1.19.2
+  --version 1.19.3
 
   [del node]
   $0 del \\
@@ -2734,7 +2736,7 @@ Example:
  
   [other]
   $0 renew-cert
-  $0 upgrade --version 1.19.2
+  $0 upgrade --version 1.19.3
   $0 add --ingress traefik
   $0 add --monitor prometheus
   $0 add --log elasticsearch
@@ -2812,7 +2814,7 @@ while [ "${1:-}" != "" ]; do
     -U | --upgrade-kernel ) UPGRADE_KERNEL_TAG=1
                             ;;
     -of | --offline-file )  shift
-	                        OFFLINE_TAG=1
+                            OFFLINE_TAG=1
                             OFFLINE_FILE=${1:-$OFFLINE_FILE}
                             ;;
     * )                     help::usage
