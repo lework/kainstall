@@ -2622,7 +2622,7 @@ function upgrade::cluster() {
       exit 1
     fi
 
-    if [[ $(version_to_number $KUBE_VERSION) < $(version_to_number ${local_version}) ]];then
+    if [[ $(utils::version_to_number $KUBE_VERSION) < $(utils::version_to_number ${local_version}) ]];then
       log::warning "[check]" "The specified version($KUBE_VERSION) is less than the local version(${local_version})!"
       exit 1
     fi
@@ -2630,7 +2630,7 @@ function upgrade::cluster() {
     local stable_version="2"
     command::exec "${MGMT_NODE}" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"
     [[ "$?" == "0" ]] && stable_version="${COMMAND_OUTPUT#v}" || true
-    if [[ $(version_to_number $KUBE_VERSION) > $(version_to_number ${stable_version}) ]];then
+    if [[ $(utils::version_to_number $KUBE_VERSION) > $(utils::version_to_number ${stable_version}) ]];then
       log::warning "[check]" "The specified version($KUBE_VERSION) is more than the stable version(${stable_version})!"
       exit 1
     fi
