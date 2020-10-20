@@ -372,6 +372,10 @@ bash kainstall.sh add \
   --10years
 ```
 
+## 联系方式
+
+- [QQ群](https://qm.qq.com/cgi-bin/qm/qr?k=HwpkLUcmroLKNv37TlrHY-D3SXuLKMOd&jump_from=webapi)
+
 ## License
 
 MIT
