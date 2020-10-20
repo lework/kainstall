@@ -58,9 +58,11 @@ MEM: `4G`
 - 安装`storage`组件，可选`rook`。
 - 安装`web ui`组件，可选`dashboard`。
 - 升级到`kubernetes`指定版本。
-- 更新证书。
+- 更新集群证书。
 - 添加运维操作，如备份etcd快照。
 - 支持**离线部署**。
+- 支持**sudo特权**。
+- 支持**10年证书期限**。
 
 ## 默认版本
 
@@ -69,14 +71,14 @@ MEM: `4G`
 | ------------------------------------------------ | ------------------ | ------------------------------------------------------------ |
 | [docker-ce](https://github.com/docker/docker-ce) | latest             | ![docker-ce release](https://img.shields.io/github/v/release/docker/docker-ce?sort=semver) |
 | [kubernetes](https://github.com/kubernetes/kubernetes) | latest             | ![kubernetes release](https://img.shields.io/github/v/release/kubernetes/kubernetes?sort=semver) |
-| [flannel](https://github.com/coreos/flannel) | 0.12.0            | ![flannel release](https://img.shields.io/github/v/release/coreos/flannel) |
+| [flannel](https://github.com/coreos/flannel) | 0.13.0            | ![flannel release](https://img.shields.io/github/v/release/coreos/flannel) |
 | [metrics server](https://github.com/kubernetes-sigs/metrics-server) | 0.3.7             | ![metrics-server release](https://img.shields.io/github/v/release/kubernetes-sigs/metrics-server) |
-| [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.35.0            | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
-| [traefik](https://github.com/traefik/traefik) | 2.3.1             | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
-| [calico](https://github.com/projectcalico/calico)                                           | 3.16.1            | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
+| [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.40.2            | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
+| [traefik](https://github.com/traefik/traefik) | 2.3.2            | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
+| [calico](https://github.com/projectcalico/calico)                                           | 3.16.3            | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
 | [kube_prometheus](https://github.com/prometheus-operator/kube-prometheus) | 0.6.0             | ![kube-prometheus release](https://img.shields.io/github/v/release/prometheus-operator/kube-prometheus) |
 | [elasticsearch](https://github.com/elastic/elasticsearch) | 7.9.2             | ![elasticsearch release](https://img.shields.io/github/v/release/elastic/elasticsearch?sort=semver) |
-| [rook](https://github.com/rook/rook) | 1.4.5 | ![rook release](https://img.shields.io/github/v/release/rook/rook?sort=semver) |
+| [rook](https://github.com/rook/rook) | 1.4.6 | ![rook release](https://img.shields.io/github/v/release/rook/rook?sort=semver) |
 | [kubernetes_dashboard](https://github.com/kubernetes/dashboard) | 2.0.4             | ![kubernetes dashboard release](https://img.shields.io/github/v/release/kubernetes/dashboard?sort=semver) |
 
 除 **kube组件** 版本可以通过参数(`--version`) 指定外，其他的软件版本需在脚本中指定。
@@ -85,7 +87,7 @@ MEM: `4G`
 
 ## 使用
 
-> 详细介绍请见：[https://lework.github.io/2020/09/26/kainstall](https://lework.github.io/2020/09/26/kainstall)
+> 案例使用请见：[https://lework.github.io/2020/09/26/kainstall](https://lework.github.io/2020/09/26/kainstall)
 
 ### 下载脚本
 
@@ -126,6 +128,10 @@ Flag:
   -s,--storage         cluster storage, choose: [rook]
   -U,--upgrade-kernel  upgrade kernel
   -of,--offline-file   specify the offline package file to load
+  --10years            the certificate period is 10 years.
+  --sudo               sudo mode
+  --sudo-user          sudo user
+  --sudo-password      sudo user password
 
 Example:
   [cluster node]
@@ -164,17 +170,7 @@ Example:
   kainstall.sh add --log elasticsearch
   kainstall.sh add --storage rook
   kainstall.sh add --ui dashboard
-
-
-ERROR Summary: 
-  
-ACCESS Summary: 
-  
-
-  See detailed log >>> /tmp/kainstall.zQe1s19qvb/kainstall.log
 ```
-
-> 脚本执行的详细日志都会保存在临时目录中 `/tmp/kainstall.zQe1s19qvb/kainstall.log`
 
 ### 初始化集群
 
@@ -279,7 +275,7 @@ bash kainstall.sh renew-cert
 ```bash
 wget http://kainstall.oss-cn-shanghai.aliyuncs.com/1.19.3/centos7.tgz
 ```
-> 离线包信息，见 [kainstall-offline](https://github.com/lework/kainstall-offline) 仓库
+> 更多离线包信息，见 [kainstall-offline](https://github.com/lework/kainstall-offline) 仓库
 
 
 **初始化集群**
@@ -302,6 +298,78 @@ bash kainstall.sh add \
   --master 192.168.77.135 \
   --worker 192.168.77.136 \
   --offline-file centos7.tgz
+```
+
+### sudo 特权
+
+创建 sudo 用户
+```bash
+useradd test
+passwd test --stdin <<< "12345678"
+echo 'test    ALL=(ALL)   ALL' >> /etc/sudoers
+```
+
+sudo 参数
+- `--sudo` 开启 sudo 特权
+- `--sudo-user` 指定 sudo 用户, 默认是 `root`
+- `--sudo-password` 指定 sudo 密码
+
+示例
+```bash
+# 初始化
+bash kainstall.sh init \
+  --master 192.168.77.130,192.168.77.131,192.168.77.132 \
+  --worker 192.168.77.133,192.168.77.134 \
+  --user test \
+  --password 12345678 \
+  --port 22 \
+  --version 1.19.3 \
+  --sudo \
+  --sudo-user root \
+  --sudo-password 12345678
+
+# 添加
+bash kainstall.sh add \
+  --master 192.168.77.135 \
+  --worker 192.168.77.136 \
+  --user test \
+  --password 12345678 \
+  --port 22 \
+  --version 1.19.3 \
+  --sudo \
+  --sudo-user root \
+  --sudo-password 12345678
+```
+
+### 10年证书期限
+
+**注意:** 此操作需要联网下载。
+
+使用 [kubeadm-certs](https://github.com/lework/kubeadm-certs) 项目编译的 `kubeadm` 客户端， 其修改了 `kubeadm` 源码，将 1 年期限修改成 10 年期限，具体信息见仓库介绍。
+
+在初始化或添加时，加上 `--10years` 参数，就可以使用`kubeadm` 10 years 的客户端
+
+示例
+```bash
+# 初始化
+bash kainstall.sh init \
+  --master 192.168.77.130,192.168.77.131,192.168.77.132 \
+  --worker 192.168.77.133,192.168.77.134 \
+  --user root \
+  --password 123456 \
+  --port 22 \
+  --version 1.19.3 \
+  --10years
+  
+# 添加
+bash kainstall.sh add \
+  --master 192.168.77.135 \
+  --worker 192.168.77.136 \
+  --user root \
+  --password 123456 \
+  --port 22 \
+  --version 1.19.3 \
+  --10years
 ```
 
 ## License

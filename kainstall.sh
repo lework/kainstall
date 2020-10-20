@@ -20,14 +20,14 @@ set -o pipefail         # Use last non-zero exit code in a pipeline
 # 版本
 DOCKER_VERSION="latest"
 KUBE_VERSION="latest"
-FLANNEL_VERSION="0.12.0"
+FLANNEL_VERSION="0.13.0"
 METRICS_SERVER_VERSION="0.3.7"
-INGRESS_NGINX="0.35.0"
-TRAEFIK_VERSION="2.3.1"
-CALICO_VERSION="3.16.1"
+INGRESS_NGINX="0.40.2"
+TRAEFIK_VERSION="2.3.2"
+CALICO_VERSION="3.16.3"
 KUBE_PROMETHEUS_VERSION="0.6.0"
 ELASTICSEARCH_VERSION="7.9.2"
-ROOK_VERSION="1.4.5"
+ROOK_VERSION="1.4.6"
 KUBERNETES_DASHBOARD_VERSION="2.0.4"
  
 # 集群配置
@@ -53,6 +53,7 @@ MGMT_NODE="127.0.0.1"
 SSH_USER="root"
 SSH_PASSWORD="123456"
 SSH_PORT="22"
+SUDO_USER="root"
 
 # 节点设置
 HOSTNAME_PREFIX="k8s"
@@ -67,15 +68,28 @@ COMMAND_OUTPUT=""
 SCRIPT_PARAMETER="$*"
 # http://kainstall.oss-cn-shanghai.aliyuncs.com/1.19.3/centos7.tgz
 OFFLINE_FILE=""
+OS_SUPPORT="centos7 centos8"
 
-
-trap 'printf "$ERROR_INFO$ACCESS_INFO"; echo -e "\n\n  See detailed log >>> $LOG_FILE \n\n";exit' 1 2 3 15 EXIT
+trap trap::info 1 2 3 15 EXIT
 
 ######################################################################################################
 # function
 ######################################################################################################
 
+function trap::info() {
+  # 信号处理
+  
+  [[ ${#ERROR_INFO} -gt 37 ]] && printf "$ERROR_INFO" || true
+  [[ ${#ACCESS_INFO} -gt 38 ]] && printf "$ACCESS_INFO" || true
+  [ -f "$LOG_FILE" ] && echo -e "\n\n  See detailed log >>> $LOG_FILE \n\n" || true
+  trap '' EXIT
+  exit
+}
+
+
 function log::err() {
+  # 错误日志
+  
   local item="[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[31mERROR:   \033[0m$*\n"
   ERROR_INFO="${ERROR_INFO}${item}  "
   printf "${item}" | tee -a $LOG_FILE
@@ -83,20 +97,25 @@ function log::err() {
 
 
 function log::info() {
+  # 基础日志
+  
   printf "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[32mINFO:    \033[0m$*\n" | tee -a $LOG_FILE
 }
 
 
 function log::warning() {
+  # 警告日志
+  
   printf "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[33mWARNING: \033[0m$*\n" | tee -a $LOG_FILE
 }
 
 
 function log::access() {
+  # 访问信息
+  
   ACCESS_INFO="${ACCESS_INFO}$*\n  "
   echo -e "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[32mINFO:    \033[0m$*\n" >> $LOG_FILE
 }
-
 
 function utils::version_to_number() {
   # 版本号转数字
@@ -128,22 +147,46 @@ function utils::retry {
 }
 
 
+function utils::quote() {
+  # 转义引号
+ 
+  if [ $(echo "$*" | tr -d "\n" | wc -c) -eq 0 ]; then
+    echo "''"
+  elif [ $(echo "$*" | tr -d "[a-z][A-Z][0-9]:,.=~_/\n-" | wc -c) -gt 0 ]; then
+    printf "%s" "$*" | sed -e '1h;2,$H;$!d;g' -e "s/'/\'\"\'\"\'/g" | sed -e '1h;2,$H;$!d;g' -e "s/^/'/g" -e "s/$/'/g"
+  else
+    echo "$*"
+  fi
+}
+
+
 function command::exec() {
   # 执行命令
 
   local host=${1:-}
   shift
-  local command="$@"
-
+  local command="$*"
+  
+  if [[ "${SUDO_TAG:-}" == "1" ]]; then
+    sudo_options="sudo -H -n -u ${SUDO_USER}"
+  
+    if [[ "${SUDO_PASSWORD:-}" != "" ]]; then
+       sudo_options="${sudo_options// -n/} -p \"\" -S <<< \"${SUDO_PASSWORD}\""
+    fi
+    command="$sudo_options bash -c $(utils::quote "$command")"
+  fi
+  
+  command="$(utils::quote "$command")"
+  
   if [[ "x${host}" == "x127.0.0.1" ]]; then
     # 本地执行
-    echo "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: INFO: [exec] \"${command}\"" >> $LOG_FILE
-    COMMAND_OUTPUT=$(bash -c "${command}" 2>> $LOG_FILE | tee -a $LOG_FILE)
+    echo "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: INFO: [exec] bash -c "${command//${SUDO_PASSWORD:-}/zzzzzz}"" >> $LOG_FILE
+    COMMAND_OUTPUT=$(eval bash -c "${command}" 2>> $LOG_FILE | tee -a $LOG_FILE)
     local status=$?
   else
     # 远程执行
-    echo "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: INFO: [exec] sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} \"${command}\"" >> $LOG_FILE
-    COMMAND_OUTPUT=$(sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} "${command}" 2>> $LOG_FILE | tee -a $LOG_FILE)
+    echo "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: INFO: [exec] sshpass -p zzzzzz ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c "${command//${SUDO_PASSWORD:-}/zzzzzz}"" >> $LOG_FILE
+    COMMAND_OUTPUT=$(sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c "${command}" 2>> $LOG_FILE | tee -a $LOG_FILE)
     local status=$?
   fi
   return $status
@@ -483,7 +526,7 @@ EOF
    # Disable Transparent Hugepages
    if test -f /sys/kernel/mm/transparent_hugepage/enabled; then echo never > /sys/kernel/mm/transparent_hugepage/enabled;fi
    if test -f /sys/kernel/mm/transparent_hugepage/defrag; then echo never > /sys/kernel/mm/transparent_hugepage/defrag;fi
-   cat <<EOF >> /etc/rc.local
+   cat << EOF >> /etc/rc.local
 ## Kainstall managed start
 # Disable Transparent Hugepages
 if test -f /sys/kernel/mm/transparent_hugepage/enabled; then echo never > /sys/kernel/mm/transparent_hugepage/enabled;fi
@@ -556,11 +599,11 @@ EOF
 function script::upgrade_kernel() {
   # 升级内核
 
-  local ver=$(rpm --eval '%{centos_ver}')
+  local ver=$(rpm --eval "%{centos_ver}")
 
-  yum install -y https://www.elrepo.org/elrepo-release-${ver}.el${ver}.elrepo.noarch.rpm
-  sed -e 's!^mirrorlist=!#mirrorlist=!g' \
-      -e 's!elrepo.org/linux!mirrors.tuna.tsinghua.edu.cn/elrepo!g' \
+  yum install -y "https://www.elrepo.org/elrepo-release-${ver}.el${ver}.elrepo.noarch.rpm"
+  sed -e "s/^mirrorlist=/#mirrorlist=/g" \
+      -e "s/elrepo.org\/linux/mirrors.tuna.tsinghua.edu.cn\/elrepo/g" \
       -i /etc/yum.repos.d/elrepo.repo
   yum install -y --disablerepo="*" --enablerepo=elrepo-kernelkernel-ml{,-devel}
 
@@ -694,7 +737,9 @@ EOF
                  kubectl${version} \
                  --disableexcludes=kubernetes
 
-  [ -d /etc/bash_completion.d ] && kubectl completion bash > /etc/bash_completion.d/kubectl
+  [ -d /etc/bash_completion.d ] && \
+    { kubectl completion bash > /etc/bash_completion.d/kubectl; \
+      kubeadm completion bash > /etc/bash_completion.d/kubadm; }
   systemctl enable kubelet
   systemctl restart kubelet
 }
@@ -786,12 +831,29 @@ function check::ssh_conn() {
 }
 
 
+function check::os() {
+  # 检查os系统支持
+
+  log::info "[check]" "os support: ${OS_SUPPORT}"
+  for host in $MASTER_NODES $WORKER_NODES
+  do
+    command::exec "${host}" "
+      [ -f /etc/os-release ] && source /etc/os-release || true
+      echo client_os:\${ID:-}\${VERSION_ID:-}
+      if [[ \"${OS_SUPPORT}\" == *\"\${ID:-}\${VERSION_ID:-}\"* ]]; then
+        exit 0
+      fi
+      exit 1
+    "
+    check::exit_code "$?" "check" "$host os support" "exit"
+  done
+}
+
+
 function check::apiserver_conn() {
   # 检查apiserver连通性
 
-  command::exec "${MGMT_NODE}" "
-     kubectl get node
-  "
+  command::exec "${MGMT_NODE}" "kubectl get node"
   check::exit_code "$?" "check" "conn apiserver" "exit"
 }
 
@@ -821,6 +883,9 @@ function check::preflight() {
 
   # check ssh conn
   check::ssh_conn
+
+  # check os
+  check::os
 
   # check apiserver conn
   [[ "x${INIT_TAG:-}" != "x1" && "x${RESET_TAG:-}" != "x1" ]] && check::apiserver_conn || true
@@ -870,6 +935,28 @@ function install::package() {
 	"
     check::exit_code "$?" "install" "install haproxy on $host"
   done
+  
+  if [[ "${CERT_YEAR_TAG:-}" == "1" ]]; then
+    local version="${KUBE_VERSION}"
+    
+    if [[ "${version}" == "latest" ]]; then
+      command::exec "${MGMT_NODE}" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"
+      [[ "$?" == "0" ]] && version="${COMMAND_OUTPUT#v}" || { log::err "[install]" "get kubernetes stable version error. Please specify the version!"; exit 1; }
+    fi
+    
+    for host in $MASTER_NODES $WORKER_NODES
+    do
+      log::info "[install]" "use kubeadm 10 years certs client"
+      command::exec "${host}" "
+        command -v wget 2>/dev/null || yum install -y wget
+	wget https://gh.lework.workers.dev/https://github.com/lework/kubeadm-certs/releases/download/v${version}/kubeadm-linux-amd64 -O /tmp/kubeadm && \
+	[[ -f /usr/bin/kubeadm && ! -f /usr/bin/kubeadm_src ]] && mv -fv /usr/bin/kubeadm{,_src} || true && \
+        mv -fv /tmp/kubeadm /usr/bin/kubeadm && \
+        chmod +x /usr/bin/kubeadm
+	"
+      check::exit_code "$?" "install" "$host: download kubeadm 10 years certs client"
+    done
+  fi
 }
 
 
@@ -884,7 +971,7 @@ function init::upgrade_kernel() {
     command::exec "${host}" "
 	  $([[ "${OFFLINE_TAG:-}" == "1" ]] && declare -f script::upgrade_kernel | sed 's/yum install/#yum install/g' || declare -f script::upgrade_kernel); script::upgrade_kernel
 	"
-    check::exit_code "$?" "init" "upgrade kernel $host"
+    check::exit_code "$?" "init" "upgrade kernel $host" "exit"
   done
   
   for host in $MASTER_NODES $WORKER_NODES
@@ -1309,19 +1396,19 @@ function kubeadm::join() {
   command::exec "${MGMT_NODE}" "
     openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //'
   "
-  [[ "$?" == "0" ]] && CACRT_HASH="${COMMAND_OUTPUT}" || true
+  [[ "$?" == "0" ]] && CACRT_HASH="${COMMAND_OUTPUT}" || { log::err "kubeadm join" "master: get CACRT_HASH failed"; exit 1; }
   
   log::info "[kubeadm join]" "master: get INTI_CERTKEY"
   command::exec "${MGMT_NODE}" "
     kubeadm init phase upload-certs --upload-certs 2>> $LOG_FILE | tail -1
   "
-  [[ "$?" == "0" ]] && INTI_CERTKEY="${COMMAND_OUTPUT}" || true
+  [[ "$?" == "0" ]] && INTI_CERTKEY="${COMMAND_OUTPUT}" || { log::err "kubeadm join" "master: get INTI_CERTKEY failed"; exit 1; }
   
   log::info "[kubeadm join]" "master: get INIT_TOKEN"
   command::exec "${MGMT_NODE}" "
     kubeadm token create
   "
-  [[ "$?" == "0" ]] && INIT_TOKEN="${COMMAND_OUTPUT}" || true
+  [[ "$?" == "0" ]] && INIT_TOKEN="${COMMAND_OUTPUT}" || { log::err "kubeadm join" "master: get INIT_TOKEN failed"; exit 1; }
   
   for host in $MASTER_NODES
   do
@@ -1371,6 +1458,7 @@ function kube::wait() {
   local resource=$3
   local selector=$4
 
+  sleep 3
   log::info "[waiting]" "waiting $app"
   command::exec "${MGMT_NODE}" "
     kubectl wait --namespace "$namespace" \
@@ -1427,7 +1515,7 @@ function config::haproxy_backend() {
     
     for host in ${work_nodes:-}
     do
-      log::info "[del]" "${host}: ${action} apiserver from haproxy"
+      log::info "[config]" "${host}: ${action} apiserver from haproxy"
       for m in $MASTER_NODES
       do
         if [[ "${action}" == "add" ]]; then
@@ -1442,7 +1530,7 @@ function config::haproxy_backend() {
           haproxy -c -f /etc/haproxy/haproxy.cfg
           systemctl reload haproxy
         "
-        check::exit_code "$?" "del" "${host}: ${action} apiserver(${m}) from haproxy"
+        check::exit_code "$?" "config" "${host}: ${action} apiserver(${m}) from haproxy"
       done
     done
   fi
@@ -1482,7 +1570,6 @@ function add::ingress() {
     sed -i 's#@sha256:.*$##g'  ${TMP_DIR}/ingress-nginx.yml
     kube::apply "${TMP_DIR}/ingress-nginx.yml"
     
-    sleep 2
     kube::wait "ingress-nginx" "ingress-nginx" "pod" "app.kubernetes.io/component=controller"
     add_ingress_demo=1
 
@@ -1765,7 +1852,7 @@ spec:
           servicePort: 80
 """
      local conn=$(get::ingress_conn)
-     log::access "[ingress]" "curl -H 'Host:app.demo.com' ${conn}"
+     log::access "[ingress]" "curl -H 'Host:app.demo.com' http://${conn}"
   fi
 }
 
@@ -2328,7 +2415,7 @@ EOF
       
     if [[ "$s" == "0" ]]; then
       local conn=$(get::ingress_conn "443")
-      log::access "[ingress]" "curl -H 'Host:kubernetes-dashboard.cluster.local' http://${conn}"
+      log::access "[ingress]" "curl -H 'Host:kubernetes-dashboard.cluster.local' https://${conn}"
 
       command::exec "${MGMT_NODE}" """
         kubectl create serviceaccount kubernetes-dashboard-admin-sa -n kubernetes-dashboard
@@ -2465,34 +2552,34 @@ function offline::load() {
   for host in ${hosts}
   do
     log::info "[offline]" "${role} ${host}: load offline file"
-    command::exec "${host}"  "[[ ! -d ${offline_dir} ]] && mkdir -p ${offline_dir} || true"
-    check::exit_code "$?" "offline" "$host: mkdir offline dir"
+    command::exec "${host}"  "[[ ! -d ${offline_dir} ]] && { mkdir -pv ${offline_dir}; chmod 777 ${offline_dir}; } || true"
+    check::exit_code "$?" "offline" "$host: mkdir offline dir" "exit"
 
     if [[ "x${UPGRADE_KERNEL_TAG:-}" == "x1" ]]; then
       command::scp "${host}" "${TMP_DIR}/rpms/kernel/*" ${offline_dir}
-      check::exit_code "$?" "offline" "scp kernel file to $host"
+      check::exit_code "$?" "offline" "scp kernel file to $host" "exit"
     else
       log::info "[offline]" "${role} ${host}: copy offline file"
       command::scp "${host}" "${TMP_DIR}/rpms/kubeadm/*" ${offline_dir}
-      check::exit_code "$?" "offline" "scp kube file to $host"
+      check::exit_code "$?" "offline" "scp kube file to $host" "exit"
       command::scp "${host}" "${TMP_DIR}/rpms/all/*" ${offline_dir}
-      check::exit_code "$?" "offline" "scp all file to $host"
+      check::exit_code "$?" "offline" "scp all file to $host" "exit"
 
       if [[ "${role}" == "worker" ]]; then
         command::scp "${host}" "${TMP_DIR}/rpms/worker/*" ${offline_dir}
-        check::exit_code "$?" "offline" "scp worker file to $host"
+        check::exit_code "$?" "offline" "scp worker file to $host" "exit"
       fi 
 
       command::scp "${host}" ${TMP_DIR}/images/${role}.tgz ${offline_dir}
-      check::exit_code "$?" "offline" "scp ${role} images to $host"
+      check::exit_code "$?" "offline" "scp ${role} images to $host" "exit"
       command::scp "${host}" ${TMP_DIR}/images/all.tgz ${offline_dir}
-      check::exit_code "$?" "offline" "scp all images to $host"
+      check::exit_code "$?" "offline" "scp all images to $host" "exit"
     fi
 
     
     log::info "[offline]" "${role} ${host}: install package"
     command::exec "${host}" "yum localinstall -y --disablerepo=* --skip-broken ${offline_dir}/*.rpm"
-    check::exit_code "$?" "offline" "${role} ${host}: install package"
+    check::exit_code "$?" "offline" "${role} ${host}: install package" "exit"
   
     if [[ "x${UPGRADE_KERNEL_TAG:-}" != "x1" ]]; then
       command::exec "${host}" "
@@ -2500,7 +2587,7 @@ function offline::load() {
         cd ${offline_dir}/ && \
         gzip -d -c ${1}.tgz | docker load && gzip -d -c all.tgz | docker load
       "
-      check::exit_code "$?" "offline" "$host: load images"	
+      check::exit_code "$?" "offline" "$host: load images" "exit"	
     fi
     command::exec "${host}" "rm -rf ${offline_dir:-/tmp/abc}"
     check::exit_code "$?" "offline" "$host: clean offline file"	
@@ -2511,7 +2598,7 @@ function offline::load() {
 function offline::cluster() {
   # 集群节点加载离线包
 
-  [ ! -f ${OFFLINE_FILE} ] && { log::error "[offline]" "not found ${OFFLINE_FILE}" ; return; } || true
+  [ ! -f ${OFFLINE_FILE} ] && { log::err "[offline]" "not found ${OFFLINE_FILE}" ; exit 1; } || true
 
   log::info "[offline]" "Unzip offline package on local."
   tar zxf ${OFFLINE_FILE}  -C ${TMP_DIR}/ && mv ${TMP_DIR}/manifests/* ${TMP_DIR}/ || true
@@ -2613,25 +2700,32 @@ function upgrade::cluster() {
 
   log::info "[upgrade]" "upgrade to $KUBE_VERSION"
 
+  local local_version=""
+  command::exec "${MGMT_NODE}" "kubeadm version -o short"
+  [[ "$?" == "0" ]] && local_version="${COMMAND_OUTPUT#v}" || true
+
+  local stable_version="2"
+  command::exec "${MGMT_NODE}" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"
+  [[ "$?" == "0" ]] && stable_version="${COMMAND_OUTPUT#v}" || true
+
   if [[ "${KUBE_VERSION}" != "latest" ]]; then
-    local local_version=""
-    command::exec "${MGMT_NODE}" "kubeadm version -o short"
-    [[ "$?" == "0" ]] && local_version="${COMMAND_OUTPUT#v}" || true
     if [[ "${KUBE_VERSION}" == "${local_version}" ]];then
       log::warning "[check]" "The specified version(${KUBE_VERSION}) is consistent with the local version(${local_version})!"
       exit 1
     fi
 
-    if [[ $(utils::version_to_number $KUBE_VERSION) < $(utils::version_to_number ${local_version}) ]];then
+    if [[ $(utils::version_to_number $KUBE_VERSION) -lt $(utils::version_to_number ${local_version}) ]];then
       log::warning "[check]" "The specified version($KUBE_VERSION) is less than the local version(${local_version})!"
       exit 1
     fi
 
-    local stable_version="2"
-    command::exec "${MGMT_NODE}" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"
-    [[ "$?" == "0" ]] && stable_version="${COMMAND_OUTPUT#v}" || true
-    if [[ $(utils::version_to_number $KUBE_VERSION) > $(utils::version_to_number ${stable_version}) ]];then
+    if [[ $(utils::version_to_number $KUBE_VERSION) -gt $(utils::version_to_number ${stable_version}) ]];then
       log::warning "[check]" "The specified version($KUBE_VERSION) is more than the stable version(${stable_version})!"
+      exit 1
+    fi
+  else
+    if [[ $(utils::version_to_number ${local_version}) -ge $(utils::version_to_number ${stable_version}) ]];then
+      log::warning "[check]" "The local version($local_version) is greater or equal to the stable version(${stable_version})!"
       exit 1
     fi
   fi
@@ -2704,6 +2798,10 @@ Flag:
   -s,--storage         cluster storage, choose: [rook]
   -U,--upgrade-kernel  upgrade kernel
   -of,--offline-file   specify the offline package file to load
+  --10years            the certificate period is 10 years.
+  --sudo               sudo mode
+  --sudo-user          sudo user
+  --sudo-password      sudo user password
 
 Example:
   [cluster node]
@@ -2816,6 +2914,16 @@ while [ "${1:-}" != "" ]; do
     -of | --offline-file )  shift
                             OFFLINE_TAG=1
                             OFFLINE_FILE=${1:-$OFFLINE_FILE}
+                            ;;
+    --10years )             CERT_YEAR_TAG=1
+                            ;;
+    --sudo )                SUDO_TAG=1
+                            ;;
+    --sudo-user )           shift
+                            SUDO_USER=${1:-$SUDO_USER}
+                            ;;
+    --sudo-password )       shift
+                            SUDO_PASSWORD=${1:-}
                             ;;
     * )                     help::usage
                             exit 1
