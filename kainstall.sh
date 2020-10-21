@@ -943,6 +943,7 @@ function install::package() {
     check::exit_code "$?" "install" "install haproxy on $host"
   done
   
+  # 10年证书
   if [[ "${CERT_YEAR_TAG:-}" == "1" ]]; then
     local version="${KUBE_VERSION}"
     
@@ -952,15 +953,19 @@ function install::package() {
     fi
     
     log::info "[install]" "download kubeadm 10 years certs client"
+    local certs_file="${OFFLINE_DIR}/bins/kubeadm-linux-amd64"
     command::exec "127.0.0.1" "
-      wget https://gh.lework.workers.dev/https://github.com/lework/kubeadm-certs/releases/download/v${version}/kubeadm-linux-amd64 -O \"${TMP_DIR}/kubeadm-linux-amd64\"
+      if [ ! -f "\"${certs_file}\"" ]; then
+        [ ! -d \"${OFFLINE_DIR}/bins\" ] && mkdir -pv \"${OFFLINE_DIR}/bins\" 
+        wget https://gh.lework.workers.dev/https://github.com/lework/kubeadm-certs/releases/download/v${version}/kubeadm-linux-amd64 -O \"${certs_file}\"
+      fi
     "
     check::exit_code "$?" "install" "download kubeadm 10 years certs client"
     
     for host in $MASTER_NODES $WORKER_NODES
     do
       log::info "[install]" "scp kubeadm client to $host"
-      command::scp "${host}" "${TMP_DIR}/kubeadm-linux-amd64" "/tmp/"
+      command::scp "${host}" "${certs_file}" "/tmp/kubeadm-linux-amd64"
       check::exit_code "$?" "install" "scp kubeadm client to $host" "exit"
 
       command::exec "${host}" "
@@ -2693,6 +2698,8 @@ function offline::load() {
   command::scp "${MGMT_NODE}" "${TMP_DIR}/manifests" ${OFFLINE_DIR}
   check::exit_code "$?" "offline" "scp manifests file to ${MGMT_NODE}" "exit"
 
+  command::scp "${MGMT_NODE}" "${TMP_DIR}/bins" ${OFFLINE_DIR}
+  check::exit_code "$?" "offline" "scp bins file to ${MGMT_NODE}" "exit"
 }
 
 
