@@ -59,14 +59,14 @@ SUDO_USER="root"
 HOSTNAME_PREFIX="k8s"
 
 # 脚本设置
-TMP_DIR="$(mktemp -d -t kainstall.XXXXXXXXXX)"
+TMP_DIR="$(rm -rf /tmp/kainstall* && mktemp -d -t kainstall.XXXXXXXXXX)"
 LOG_FILE="${TMP_DIR}/kainstall.log"
 SSH_OPTIONS="-o ConnectTimeout=600 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 ERROR_INFO="\n\033[31mERROR Summary: \033[0m\n  "
 ACCESS_INFO="\n\033[32mACCESS Summary: \033[0m\n  "
 COMMAND_OUTPUT=""
 SCRIPT_PARAMETER="$*"
-# http://kainstall.oss-cn-shanghai.aliyuncs.com/1.19.3/centos7.tgz
+OFFLINE_DIR="/tmp/kainstall-offline-file/"
 OFFLINE_FILE=""
 OS_SUPPORT="centos7 centos8"
 
@@ -115,6 +115,13 @@ function log::access() {
   
   ACCESS_INFO="${ACCESS_INFO}$*\n  "
   echo -e "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[32mINFO:    \033[0m$*\n" >> $LOG_FILE
+}
+
+
+function log::exec() {
+  # 执行日志
+  
+  echo -e "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[34mEXEC:    \033[0m$*\n" >> $LOG_FILE
 }
 
 function utils::version_to_number() {
@@ -180,12 +187,12 @@ function command::exec() {
   
   if [[ "x${host}" == "x127.0.0.1" ]]; then
     # 本地执行
-    echo "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: INFO: [exec] bash -c "${command//${SUDO_PASSWORD:-}/zzzzzz}"" >> $LOG_FILE
+    log::exec "[command]" "bash -c $(printf "%s" "${command//${SUDO_PASSWORD:-}/zzzzzz}")"
     COMMAND_OUTPUT=$(eval bash -c "${command}" 2>> $LOG_FILE | tee -a $LOG_FILE)
     local status=$?
   else
     # 远程执行
-    echo "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: INFO: [exec] sshpass -p zzzzzz ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c "${command//${SUDO_PASSWORD:-}/zzzzzz}"" >> $LOG_FILE
+    log::exec "[command]" "sshpass -p zzzzzz ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c $(printf "%s" "${command//${SUDO_PASSWORD:-}/zzzzzz}")"
     COMMAND_OUTPUT=$(sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c "${command}" 2>> $LOG_FILE | tee -a $LOG_FILE)
     local status=$?
   fi
@@ -940,21 +947,33 @@ function install::package() {
     local version="${KUBE_VERSION}"
     
     if [[ "${version}" == "latest" ]]; then
-      command::exec "${MGMT_NODE}" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"
+      command::exec "127.0.0.1" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"
       [[ "$?" == "0" ]] && version="${COMMAND_OUTPUT#v}" || { log::err "[install]" "get kubernetes stable version error. Please specify the version!"; exit 1; }
     fi
     
+    log::info "[install]" "download kubeadm 10 years certs client"
+    command::exec "127.0.0.1" "
+      wget https://gh.lework.workers.dev/https://github.com/lework/kubeadm-certs/releases/download/v${version}/kubeadm-linux-amd64 -O \"${TMP_DIR}/kubeadm-linux-amd64\"
+    "
+    check::exit_code "$?" "install" "download kubeadm 10 years certs client"
+    
     for host in $MASTER_NODES $WORKER_NODES
     do
-      log::info "[install]" "use kubeadm 10 years certs client"
+      log::info "[install]" "scp kubeadm client to $host"
+      command::scp "${host}" "${TMP_DIR}/kubeadm-linux-amd64" "/tmp/"
+      check::exit_code "$?" "install" "scp kubeadm client to $host" "exit"
+
       command::exec "${host}" "
-        command -v wget 2>/dev/null || yum install -y wget
-	wget https://gh.lework.workers.dev/https://github.com/lework/kubeadm-certs/releases/download/v${version}/kubeadm-linux-amd64 -O /tmp/kubeadm && \
-	[[ -f /usr/bin/kubeadm && ! -f /usr/bin/kubeadm_src ]] && mv -fv /usr/bin/kubeadm{,_src} || true && \
-        mv -fv /tmp/kubeadm /usr/bin/kubeadm && \
-        chmod +x /usr/bin/kubeadm
-	"
-      check::exit_code "$?" "install" "$host: download kubeadm 10 years certs client"
+        if [[ -f /tmp/kubeadm-linux-amd64 ]]; then
+	      [[ -f /usr/bin/kubeadm && ! -f /usr/bin/kubeadm_src ]] && mv -fv /usr/bin/kubeadm{,_src} || true && \
+          mv -fv /tmp/kubeadm-linux-amd64 /usr/bin/kubeadm && \
+          chmod +x /usr/bin/kubeadm
+        else
+          echo \"not found /tmp/kubeadm-linux-amd64\"
+          exit 1
+        fi
+	  "
+      check::exit_code "$?" "install" "$host: use kubeadm 10 years certs client"
     done
   fi
 }
@@ -1101,6 +1120,22 @@ function init::node() {
   
   init::upgrade_kernel
 
+  # 设置主机名解析
+  local node_hosts=""
+  local i=1
+  for h in $MASTER_NODES
+  do
+    node_hosts="${node_hosts}\n$h ${HOSTNAME_PREFIX}-master-node${i}"
+    i=$((i + 1))
+  done
+  
+  local i=1
+  for h in $WORKER_NODES
+  do
+    node_hosts="${node_hosts}\n$h ${HOSTNAME_PREFIX}-worker-node${i}"
+    i=$((i + 1))
+  done
+
   local index=1
   # master节点
   for host in $MASTER_NODES
@@ -1111,29 +1146,13 @@ function init::node() {
 	"
     check::exit_code "$?" "init" "init master $host"
 
-    # 设置主机名
+    # 设置主机名和解析
     command::exec "${host}" "
-      echo "${MGMT_NODE} $KUBE_APISERVER" >> /etc/hosts
+      printf "\"${MGMT_NODE} $KUBE_APISERVER\\n$node_hosts\"" >> /etc/hosts
       hostnamectl set-hostname ${HOSTNAME_PREFIX}-master-node${index}
     "
-    check::exit_code "$?" "init" "$host set hostname"
+    check::exit_code "$?" "init" "$host set hostname and hostname resolution"
 
-    # 设置主机名解析
-    local i=1
-    for h in $MASTER_NODES
-    do
-      command::exec "${host}" "echo '$h ${HOSTNAME_PREFIX}-master-node${i}'  >> /etc/hosts"
-      check::exit_code "$?" "init" "$host: add $h hostname resolve"
-      i=$((i + 1))
-    done
-    
-    local i=1
-    for h in $WORKER_NODES
-    do
-      command::exec "${host}" "echo '$h ${HOSTNAME_PREFIX}-worker-node${i}'  >> /etc/hosts"
-      check::exit_code "$?" "init" "$host: add $h hostname resolve"
-      i=$((i + 1))
-    done
     
     index=$((index + 1))
   done
@@ -1148,33 +1167,13 @@ function init::node() {
 	"
     check::exit_code "$?" "init" "init worker $host"
 
-    # 设置主机名
+    # 设置主机名和解析
     command::exec "${host}" "
-      echo '127.0.0.1 $KUBE_APISERVER' >> /etc/hosts
+      printf "\"127.0.0.1 $KUBE_APISERVER\\n$node_hosts\"" >> /etc/hosts
       hostnamectl set-hostname ${HOSTNAME_PREFIX}-worker-node${index}
     "
-
-    # 设置主机名解析
-    local i=1
-    for h in $MASTER_NODES
-    do
-      command::exec "${host}" "echo '$h ${HOSTNAME_PREFIX}-master-node${i}'  >> /etc/hosts"
-      check::exit_code "$?" "init" "$host: add $h hostname resolve"
-      i=$((i + 1))
-    done
-    
-    local i=1
-    for h in $WORKER_NODES
-    do
-      command::exec "${host}" "echo '$h ${HOSTNAME_PREFIX}-worker-node${i}'  >> /etc/hosts"
-      check::exit_code "$?" "init" "$host: add $h hostname resolve"
-      i=$((i + 1))
-    done
-
     index=$((index + 1))
   done
-
-
 }
 
 
@@ -1183,25 +1182,53 @@ function init::add_node() {
   
   init::upgrade_kernel
 
-  local index=0
-  command::exec "${MGMT_NODE}" "
-    kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
-  "
-  [[ "$?" == "0" ]] && index="${COMMAND_OUTPUT}" || true
-    
-  index=$(( index + 1 ))
-  
-  command::exec "${MGMT_NODE}" "
-    kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {.metadata.name }\\n{end}'
-  "
-  [[ "$?" == "0" ]] && local node_hosts="${COMMAND_OUTPUT}" || true
-  
+  local master_index=0
+  local worker_index=0
+  local add_node_hosts=""
+
   command::exec "${MGMT_NODE}" "
     kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address } {end}' | awk '{print \$1}'
   "
   [[ "$?" == "0" ]] && MGMT_NODE="${COMMAND_OUTPUT}" || true
 
-  # master节点
+  # 获取现有集群节点主机名
+  command::exec "${MGMT_NODE}" "
+    kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {.metadata.name }\\n{end}'
+  "
+  [[ "$?" == "0" ]] && local node_hosts="${COMMAND_OUTPUT}" || true
+  
+  # 获取节点索引
+  command::exec "${MGMT_NODE}" "
+    kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
+  "
+  [[ "$?" == "0" ]] && master_index="${COMMAND_OUTPUT}" || true
+    
+  command::exec "${MGMT_NODE}" "
+    kubectl get node --selector='!node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
+  "
+  [[ "$?" == "0" ]] && worker_index="${COMMAND_OUTPUT}" || true
+  
+  master_index=$(( master_index + 1 ))
+  worker_index=$(( worker_index + 1 ))
+
+  # 获取添加的节点主机名解析记录
+  local i=$master_index
+  for host in $MASTER_NODES
+  do
+    add_node_hosts="${add_node_hosts}\n${host:-} ${HOSTNAME_PREFIX}-master-node${i}"
+    i=$((i + 1))
+  done
+  
+
+  i=$worker_index
+  for host in $WORKER_NODES
+  do
+    add_node_hosts="${add_node_hosts}\n${host:-} ${HOSTNAME_PREFIX}-worker-node${i}"
+    i=$((i + 1))
+  done
+
+
+  # 初始化master节点
   for host in $MASTER_NODES
   do
     if [[ $node_hosts == *"$host"* ]]; then
@@ -1217,23 +1244,14 @@ function init::add_node() {
 
     # 设置主机名和解析
     command::exec "${host}" "
-      echo "${MGMT_NODE} $KUBE_APISERVER" >> /etc/hosts
-      printf "\"$node_hosts\"" >> /etc/hosts
-      echo "${host:-} ${HOSTNAME_PREFIX}-master-node${index}" >> /etc/hosts
-      hostnamectl set-hostname ${HOSTNAME_PREFIX}-master-node${index}
+      printf "\"${MGMT_NODE} $KUBE_APISERVER\\n$node_hosts\\n$add_node_hosts\"" >> /etc/hosts
+      hostnamectl set-hostname ${HOSTNAME_PREFIX}-master-node${master_index}
     "
-    check::exit_code "$?" "init" "$host set hostname and resolve"
-    index=$((index + 1))
+    check::exit_code "$?" "init" "$host: set hostname and add cluster node hostname resolution"
+    master_index=$((master_index + 1))
   done
    
-  # worker 节点
-  index=0
-  command::exec "${MGMT_NODE}" "
-    kubectl get node --selector='!node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
-  "
-  [[ "$?" == "0" ]] && index="${COMMAND_OUTPUT}" || true
-  
-  index=$(( index + 1 ))
+  # 初始化worker节点
   for host in $WORKER_NODES
   do
     if [[ $node_hosts == *"$host"* ]]; then
@@ -1248,14 +1266,22 @@ function init::add_node() {
 
     # 设置主机名和解析
     command::exec "${host}" "
-      echo '127.0.0.1 $KUBE_APISERVER' >> /etc/hosts
-      printf "\"$node_hosts\"" >> /etc/hosts
-      echo "${host} ${HOSTNAME_PREFIX}-worker-node${index}" >> /etc/hosts
-      hostnamectl set-hostname ${HOSTNAME_PREFIX}-worker-node${index}
+      printf "\"127.0.0.1 $KUBE_APISERVER\\n$node_hosts\\n$add_node_hosts\"" >> /etc/hosts
+      hostnamectl set-hostname ${HOSTNAME_PREFIX}-worker-node${worker_index}
     "
-    check::exit_code "$?" "init" "$host set hostname and resolve"
-    index=$((index + 1))
+    check::exit_code "$?" "init" "$host: set hostname and add cluster node hostname resolution"
+    worker_index=$((worker_index + 1))
   done
+
+  #向集群节点添加新增的节点主机名解析 
+  for host in $(printf "$node_hosts" | awk '{print $1}')
+  do
+     command::exec "${host}" "
+       printf "\"$add_node_hosts\"" >> /etc/hosts
+     "
+     check::exit_code "$?" "init" "$host add new node hostname resolution"
+  done
+
 }
 
 
@@ -1474,12 +1500,13 @@ function kube::apply() {
   # 应用manifest
 
   local file=$1
-  [ -f "$file" ] && local manifest=$(cat $file) || local manifest="${2:-}"
 
   log::info "[apply]" "$file"
   command::exec "${MGMT_NODE}" "
-    cat <<EOF | kubectl apply --wait=true --timeout=10s -f -
-$(printf "%s" "$manifest")
+    $(declare -f utils::retry)
+    [ -f \"$file\" ] && manifest=\$(cat \"$file\") || manifest=\"${2:-}\"
+    utils::retry 5 cat <<EOF | kubectl apply --wait=true --timeout=10s -f -
+\$(printf \"%s\" \"\$manifest\")
 EOF
   "
   check::exit_code "$?" "apply" "add $file"
@@ -1563,12 +1590,17 @@ function add::ingress() {
 
   if [[ "$KUBE_INGRESS" == "nginx" ]]; then
     log::info "[ingress]" "download ingress-nginx manifests"
-    [ ! -f ${TMP_DIR}/ingress-nginx.yml ] && \
-       wget https://cdn.jsdelivr.net/gh/kubernetes/ingress-nginx@controller-v${INGRESS_NGINX}/deploy/static/provider/baremetal/deploy.yaml -O ${TMP_DIR}/ingress-nginx.yml  >> $LOG_FILE 2>&1 || true
-    sed -i "s#k8s.gcr.io#k8sgcr.lework.workers.dev#g" ${TMP_DIR}/ingress-nginx.yml
-    sed -i 's#$(POD_NAMESPACE)#\\$(POD_NAMESPACE)#g' ${TMP_DIR}/ingress-nginx.yml
-    sed -i 's#@sha256:.*$##g'  ${TMP_DIR}/ingress-nginx.yml
-    kube::apply "${TMP_DIR}/ingress-nginx.yml"
+    local ingress_nginx_file="${OFFLINE_DIR}/manifests/ingress-nginx.yml"
+    command::exec "${MGMT_NODE}" "
+      if [ ! -f "\"${ingress_nginx_file}\"" ]; then
+        [ ! -d \"${OFFLINE_DIR}/manifests\" ] && mkdir -pv \"${OFFLINE_DIR}/manifests\" 
+        wget https://cdn.jsdelivr.net/gh/kubernetes/ingress-nginx@controller-v${INGRESS_NGINX}/deploy/static/provider/baremetal/deploy.yaml -O \"${ingress_nginx_file}\"
+      fi
+      sed -i -e 's#k8s.gcr.io#k8sgcr.lework.workers.dev#g' \
+             -e 's#@sha256:.*\$##g' '${ingress_nginx_file}'
+    "
+    check::exit_code "$?" "ingress" "download ingress-nginx manifests"
+    kube::apply "${ingress_nginx_file}"
     
     kube::wait "ingress-nginx" "ingress-nginx" "pod" "app.kubernetes.io/component=controller"
     add_ingress_demo=1
@@ -1862,21 +1894,27 @@ function add::network() {
 
   if [[ "$KUBE_NETWORK" == "flannel" ]]; then
     log::info "[network]" "download flannel manifests"
-    [ ! -f ${TMP_DIR}/kube-flannel.yml ] && \
-      wget https://cdn.jsdelivr.net/gh/coreos/flannel@v${FLANNEL_VERSION}/Documentation/kube-flannel.yml -O ${TMP_DIR}/kube-flannel.yml >> $LOG_FILE 2>&1 || true
-    sed -i "s#10.244.0.0/16#$KUBE_POD_SUBNET#g" ${TMP_DIR}/kube-flannel.yml
-    
-    kube::apply "${TMP_DIR}/kube-flannel.yml"
+    local flannel_file="${OFFLINE_DIR}/manifests/kube-flannel.yml"
+    command::exec "${MGMT_NODE}" "
+      if [ ! -f "\"${flannel_file}\"" ]; then
+        [ ! -d \"${OFFLINE_DIR}/manifests\" ] && mkdir -pv \"${OFFLINE_DIR}/manifests\" 
+        wget https://cdn.jsdelivr.net/gh/coreos/flannel@v${FLANNEL_VERSION}/Documentation/kube-flannel.yml -O \"${flannel_file}\"
+      fi
+      sed -i 's#10.244.0.0/16#$KUBE_POD_SUBNET#g' \"${flannel_file}\"
+    "
+    check::exit_code "$?" "flannel" "download flannel manifests"
+    kube::apply "${flannel_file}"
 
   elif [[ "$KUBE_NETWORK" == "calico" ]]; then
     log::info "[network]" "download calico manifests"
     command::exec "${MGMT_NODE}" "
-      wget https://docs.projectcalico.org/manifests/calico.yaml -O /tmp/calico.yml
-      wget https://docs.projectcalico.org/manifests/calicoctl.yaml -O /tmp/calicoctl.yaml
-      sed -i "s#:v.*#:v${CALICO_VERSION}#g" /tmp/calico.yml
-      sed -i "s#:v.*#:v${CALICO_VERSION}#g" /tmp/calicoctl.yaml
-      kubectl apply -f /tmp/calico.yml
-      kubectl apply -f /tmp/calicoctl.yaml
+      [ ! -d \"${OFFLINE_DIR}/manifests\" ] && mkdir -pv \"${OFFLINE_DIR}/manifests\" 
+      wget https://docs.projectcalico.org/manifests/calico.yaml -O \"${OFFLINE_DIR}/manifests/calico.yml\"
+      wget https://docs.projectcalico.org/manifests/calicoctl.yaml -O \"${OFFLINE_DIR}/manifests/calicoctl.yaml\"
+      sed -i "s#:v.*#:v${CALICO_VERSION}#g" \"${OFFLINE_DIR}/manifests/calico.yml\"
+      sed -i "s#:v.*#:v${CALICO_VERSION}#g" \"${OFFLINE_DIR}/manifests/calicoctl.yaml\"
+      kubectl apply -f \"${OFFLINE_DIR}/manifests/calico.yaml\"
+      kubectl apply -f \"${OFFLINE_DIR}/manifests/calicoctl.yaml\"
     "
     check::exit_code "$?" "apply" "add calico"
   else
@@ -1889,12 +1927,20 @@ function add::addon() {
   # 添加addon组件
 
   log::info "[addon]" "download metrics-server manifests"
-  [ ! -f ${TMP_DIR}/metrics-server.yml ] && \
-    wget https://github.com/kubernetes-sigs/metrics-server/releases/download/v${METRICS_SERVER_VERSION}/components.yaml -O ${TMP_DIR}/metrics-server.yml  >> $LOG_FILE 2>&1 || true
-  sed -i "s#k8s.gcr.io/metrics-server#$KUBE_IMAGE_REPO#g" ${TMP_DIR}/metrics-server.yml
-  sed -i '/--secure-port=4443/a\          - --kubelet-insecure-tls' ${TMP_DIR}/metrics-server.yml
-  sed -i '/--secure-port=4443/a\          - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname' ${TMP_DIR}/metrics-server.yml
-  kube::apply "${TMP_DIR}/metrics-server.yml"
+  local metrics_server_file="${OFFLINE_DIR}/manifests/metrics-server.yml"
+
+  command::exec "${MGMT_NODE}" "
+    if [ ! -f "\"${metrics_server_file}\"" ]; then
+      [ ! -d \"${OFFLINE_DIR}/manifests\" ] && mkdir -pv \"${OFFLINE_DIR}/manifests\" 
+      wget https://github.com/kubernetes-sigs/metrics-server/releases/download/v${METRICS_SERVER_VERSION}/components.yaml -O \"${metrics_server_file}\"
+    fi
+    sed -i -e 's#k8s.gcr.io/metrics-server#$KUBE_IMAGE_REPO#g' \
+           -e '/--secure-port=4443/a\          - --kubelet-insecure-tls' \
+           -e '/--secure-port=4443/a\          - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname' \
+           \"${metrics_server_file}\"
+  "
+  check::exit_code "$?" "addon" "download metrics-server manifests"
+  kube::apply "${metrics_server_file}"
 }
 
 
@@ -1904,15 +1950,16 @@ function add::monitor() {
   if [[ "$KUBE_MONITOR" == "prometheus" ]]; then
     log::info "[monitor]" "download prometheus manifests"
     command::exec "${MGMT_NODE}" "
-      wget https://gh.lework.workers.dev/https://github.com/prometheus-operator/kube-prometheus/archive/v${KUBE_PROMETHEUS_VERSION}.zip -O /tmp/prometheus.zip
+      [ ! -d \"${OFFLINE_DIR}/manifests\" ] && mkdir -pv \"${OFFLINE_DIR}/manifests\" 
+      wget https://gh.lework.workers.dev/https://github.com/prometheus-operator/kube-prometheus/archive/v${KUBE_PROMETHEUS_VERSION}.zip -O \"${OFFLINE_DIR}/manifests/prometheus.zip\"
       command -v unzip 2>/dev/null || yum install -y unzip
-      unzip -o /tmp/prometheus.zip -d /tmp/
+      unzip -o \"${OFFLINE_DIR}/manifests/prometheus.zip\" -d \"${OFFLINE_DIR}/manifests/\"
     "
     check::exit_code "$?" "monitor" "download prometheus"
    
     log::info "[monitor]" "apply prometheus manifests"
     command::exec "${MGMT_NODE}" "
-      cd /tmp/kube-prometheus-${KUBE_PROMETHEUS_VERSION} \
+      cd \"${OFFLINE_DIR}/manifests/kube-prometheus-${KUBE_PROMETHEUS_VERSION}\" \
       && kubectl apply -f manifests/setup/ \
       && until kubectl get servicemonitors --all-namespaces ; do date; sleep 1; echo ''; done \
       && kubectl apply -f manifests/
@@ -2020,7 +2067,7 @@ EOF
     
     if [[ "$s" == "0" ]]; then
       local conn=$(get::ingress_conn)
-      log::access "[ingress]" "curl -H 'Host:grafana.monitoring.cluster.local' ${conn}"
+      log::access "[ingress]" "curl -H 'Host:grafana.monitoring.cluster.local' ${conn}; auth: admin/admin"
       log::access "[ingress]" "curl -H 'Host:prometheus.monitoring.cluster.local' ${conn}"
       log::access "[ingress]" "curl -H 'Host:alertmanager.monitoring.cluster.local' ${conn}"
     fi
@@ -2327,22 +2374,23 @@ function add::storage() {
     log::info "[storage]" "add rook"
     log::info "[storage]" "download rook manifests"
     command::exec "${MGMT_NODE}" """
-      wget https://gh.lework.workers.dev/https://github.com/rook/rook/archive/v${ROOK_VERSION}.zip  -O /tmp/rook-${ROOK_VERSION}.zip
+      [ ! -d \"${OFFLINE_DIR}/manifests\" ] && mkdir -pv \"${OFFLINE_DIR}/manifests\" 
+      wget https://gh.lework.workers.dev/https://github.com/rook/rook/archive/v${ROOK_VERSION}.zip -O \"${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}.zip\"
       command -v unzip 2>/dev/null || yum install -y unzip
-      unzip -o /tmp/rook-${ROOK_VERSION}.zip -d /tmp/
+      unzip -o \"${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}.zip\" -d \"${OFFLINE_DIR}/manifests/\"
     """
     check::exit_code "$?" "storage" "download rook manifests"
 
     log::info "[storage]" "add rook operator"
     command::exec "${MGMT_NODE}" """
-      cd /tmp/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/ \
+      cd \"${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/\" \
       && kubectl apply -f common.yaml -f operator.yaml
     """
     check::exit_code "$?" "apply" "add rook operator"
 
     log::info "[storage]" "create ceph cluster"
     command::exec "${MGMT_NODE}" """
-      cd /tmp/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/ \
+      cd \"${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/\" \
       && kubectl apply -f cluster.yaml
 """
     check::exit_code "$?" "apply" "add ceph"
@@ -2359,9 +2407,15 @@ function add::ui() {
   if [[ "$KUBE_UI" == "dashboard" ]]; then
     log::info "[ui]" "add kubernetes dashboard"
     log::info "[ui]" "download dashboard manifests"
-    [ ! -f ${TMP_DIR}/kubernetes-dashboard.yml ] && \
-      wget https://cdn.jsdelivr.net/gh/kubernetes/dashboard@v${KUBERNETES_DASHBOARD_VERSION}/aio/deploy/recommended.yaml -O ${TMP_DIR}/kubernetes-dashboard.yml  >> $LOG_FILE 2>&1 || true
-    kube::apply "${TMP_DIR}/kubernetes-dashboard.yml"
+    local dashboard_file="${OFFLINE_DIR}/manifests/kubernetes-dashboard.yml"
+    command::exec "${MGMT_NODE}" "
+      if [ ! -f "\"${dashboard_file}\"" ]; then
+        [ ! -d \"${OFFLINE_DIR}/manifests\" ] && mkdir -pv \"${OFFLINE_DIR}/manifests\" 
+        wget https://cdn.jsdelivr.net/gh/kubernetes/dashboard@v${KUBERNETES_DASHBOARD_VERSION}/aio/deploy/recommended.yaml -O \"${dashboard_file}\"
+      fi
+    "
+    check::exit_code "$?" "ui" "download dashboard manifests"
+    kube::apply "${dashboard_file}"
 
     command::exec "${MGMT_NODE}" """
       cat <<EOF | kubectl apply -f -
@@ -2417,15 +2471,15 @@ EOF
       local conn=$(get::ingress_conn "443")
       log::access "[ingress]" "curl -H 'Host:kubernetes-dashboard.cluster.local' https://${conn}"
 
-      command::exec "${MGMT_NODE}" """
+      command::exec "${MGMT_NODE}" "
         kubectl create serviceaccount kubernetes-dashboard-admin-sa -n kubernetes-dashboard
         kubectl create clusterrolebinding kubernetes-dashboard-admin-sa --clusterrole=cluster-admin --serviceaccount=kubernetes-dashboard:kubernetes-dashboard-admin-sa -n kubernetes-dashboard
-      """
+      "
       s="$?"
       check::exit_code "$s" "ui" "create kubernetes dashboard admin service account"
-      command::exec "${MGMT_NODE}" """
+      command::exec "${MGMT_NODE}" "
         kubectl describe secrets \$(kubectl describe sa kubernetes-dashboard-admin-sa -n kubernetes-dashboard | awk '/Tokens/ {print \$2}') -n kubernetes-dashboard | awk '/token:/{print \$2}'
-      """
+      "
       s="$?"
       check::exit_code "$s" "ui" "get kubernetes dashboard admin token"
       [[ "$s" == "0" ]] && log::access "[Token]" "${COMMAND_OUTPUT}"
@@ -2441,6 +2495,8 @@ function add::ops() {
    # 运维操作
    
    log::info "[ops]" "add etcd snapshot cronjob"
+   local master_num=$(awk '{print NF}' <<< ${MASTER_NODES})
+   [[ "${master_num:-0}" == "0" ]] && master_num=1 || true
    kube::apply "etcd-snapshot" """
 ---
 apiVersion: batch/v1beta1
@@ -2449,44 +2505,83 @@ metadata:
   name: etcd-snapshot
   namespace: kube-system
 spec:
-  # activeDeadlineSeconds: 100
-  schedule: '1 */2 * * *'
+  schedule: '0 */6 * * *'
+  successfulJobsHistoryLimit: 3
+  suspend: false
+  concurrencyPolicy: Allow
+  failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
+      backoffLimit: 6
+      parallelism: ${master_num}
+      completions: ${master_num}
       template:
+        metadata:
+          labels:
+            app: etcd-snapshot
         spec:
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                    - etcd-snapshot
+                topologyKey: 'kubernetes.io/hostname'
           containers:
           - name: etcd-snapshot
             # Same image as in /etc/kubernetes/manifests/etcd.yaml
             image: ${KUBE_IMAGE_REPO}/etcd:3.4.13-0
+            imagePullPolicy: IfNotPresent
+            args:
+            - -c
+            - etcdctl --endpoints=https://127.0.0.1:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt
+              --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt --key=/etc/kubernetes/pki/etcd/healthcheck-client.key
+              snapshot save /backup/etcd-snapshot-\\\$(date +%Y-%m-%d_%H:%M:%S_%Z).db
+              && echo 'delete old backups' && find /backup -type f -mtime +30 -exec rm -fv {} \\\; || echo error
+            command:
+            - /bin/sh
             env:
             - name: ETCDCTL_API
-              value: '3'
-            command: ['/bin/sh']
-            args: [\"-c\", \"etcdctl --endpoints=https://127.0.0.1:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt --key=/etc/kubernetes/pki/etcd/healthcheck-client.key snapshot save /var/lib/etcd/etcd-snapshot-\\\$(date +%Y-%m-%d_%H:%M:%S_%Z).db\"]
+              value: \\\"3\\\"
+            resources: {}
+            terminationMessagePath: /dev/termination-log
+            terminationMessagePolicy: File
             volumeMounts:
-            - mountPath: /etc/kubernetes/pki/etcd
-              name: etcd-certs
+            - name: etcd-certs
+              mountPath: /etc/kubernetes/pki/etcd
               readOnly: true
-            - mountPath: /var/lib/etcd
-              name: etcd-data
-          restartPolicy: OnFailure
+            - name: backup
+              mountPath: /backup
+            - name: localtime
+              mountPath: /etc/localtime
+          dnsPolicy: ClusterFirst
+          hostNetwork: true
           nodeSelector:
             node-role.kubernetes.io/master: ''
           tolerations:
           - effect: NoSchedule
             operator: Exists
-          hostNetwork: true
+          restartPolicy: OnFailure
+          schedulerName: default-scheduler
+          securityContext: {}
+          terminationGracePeriodSeconds: 30
           volumes:
           - name: etcd-certs
             hostPath:
               path: /etc/kubernetes/pki/etcd
               type: DirectoryOrCreate
-          - name: etcd-data
+          - name: backup
             hostPath:
-              path: /var/lib/etcd
+              path: /var/lib/etcd/backups
               type: DirectoryOrCreate
+          - name: localtime
+            hostPath:
+              path: /etc/localtime
 """
+  log::access "[ops]" "etcd backup directory: /var/lib/etcd/backups"
 }
 
 
@@ -2511,6 +2606,7 @@ function reset::node() {
     ip link delete flannel.1 || echo 0
     ip link delete cni0 || echo 0
     ip link delete tunl0 || echo 0
+    [ -d \"${OFFLINE_DIR}:-/tmp/abc\" ] && rm -rf \"${OFFLINE_DIR:-/tmp/abc}\" || echo 0
   "
   check::exit_code "$?" "reset" "$host: reset"
 }
@@ -2541,57 +2637,62 @@ function offline::load() {
  
   local role="${1:-}"
   local hosts=""
-  local offline_dir="/tmp/offline-file/"
+  
 
   if [[ "${role}" == "master" ]]; then
      hosts="${MASTER_NODES}"
   elif [[ "${role}" == "worker" ]]; then
      hosts="${WORKER_NODES}"
   fi
-  
+ 
+
   for host in ${hosts}
   do
     log::info "[offline]" "${role} ${host}: load offline file"
-    command::exec "${host}"  "[[ ! -d ${offline_dir} ]] && { mkdir -pv ${offline_dir}; chmod 777 ${offline_dir}; } || true"
+    command::exec "${host}"  "[[ ! -d ${OFFLINE_DIR} ]] && { mkdir -pv ${OFFLINE_DIR}; chmod 777 ${OFFLINE_DIR}; } || true"
     check::exit_code "$?" "offline" "$host: mkdir offline dir" "exit"
 
     if [[ "x${UPGRADE_KERNEL_TAG:-}" == "x1" ]]; then
-      command::scp "${host}" "${TMP_DIR}/rpms/kernel/*" ${offline_dir}
+      command::scp "${host}" "${TMP_DIR}/rpms/kernel/*" ${OFFLINE_DIR}
       check::exit_code "$?" "offline" "scp kernel file to $host" "exit"
     else
       log::info "[offline]" "${role} ${host}: copy offline file"
-      command::scp "${host}" "${TMP_DIR}/rpms/kubeadm/*" ${offline_dir}
+      command::scp "${host}" "${TMP_DIR}/rpms/kubeadm/*" ${OFFLINE_DIR}
       check::exit_code "$?" "offline" "scp kube file to $host" "exit"
-      command::scp "${host}" "${TMP_DIR}/rpms/all/*" ${offline_dir}
+      command::scp "${host}" "${TMP_DIR}/rpms/all/*" ${OFFLINE_DIR}
       check::exit_code "$?" "offline" "scp all file to $host" "exit"
 
       if [[ "${role}" == "worker" ]]; then
-        command::scp "${host}" "${TMP_DIR}/rpms/worker/*" ${offline_dir}
+        command::scp "${host}" "${TMP_DIR}/rpms/worker/*" ${OFFLINE_DIR}
         check::exit_code "$?" "offline" "scp worker file to $host" "exit"
       fi 
 
-      command::scp "${host}" ${TMP_DIR}/images/${role}.tgz ${offline_dir}
+      command::scp "${host}" ${TMP_DIR}/images/${role}.tgz ${OFFLINE_DIR}
       check::exit_code "$?" "offline" "scp ${role} images to $host" "exit"
-      command::scp "${host}" ${TMP_DIR}/images/all.tgz ${offline_dir}
+      command::scp "${host}" ${TMP_DIR}/images/all.tgz ${OFFLINE_DIR}
       check::exit_code "$?" "offline" "scp all images to $host" "exit"
     fi
 
     
     log::info "[offline]" "${role} ${host}: install package"
-    command::exec "${host}" "yum localinstall -y --disablerepo=* --skip-broken ${offline_dir}/*.rpm"
+    command::exec "${host}" "yum localinstall -y --disablerepo=* --skip-broken ${OFFLINE_DIR}/*.rpm"
     check::exit_code "$?" "offline" "${role} ${host}: install package" "exit"
   
     if [[ "x${UPGRADE_KERNEL_TAG:-}" != "x1" ]]; then
       command::exec "${host}" "
         systemctl start docker && \
-        cd ${offline_dir}/ && \
+        cd ${OFFLINE_DIR} && \
         gzip -d -c ${1}.tgz | docker load && gzip -d -c all.tgz | docker load
       "
       check::exit_code "$?" "offline" "$host: load images" "exit"	
     fi
-    command::exec "${host}" "rm -rf ${offline_dir:-/tmp/abc}"
+    command::exec "${host}" "rm -rf ${OFFLINE_DIR:-/tmp/abc}"
     check::exit_code "$?" "offline" "$host: clean offline file"	
   done
+
+  command::scp "${MGMT_NODE}" "${TMP_DIR}/manifests" ${OFFLINE_DIR}
+  check::exit_code "$?" "offline" "scp manifests file to ${MGMT_NODE}" "exit"
+
 }
 
 
@@ -2601,7 +2702,7 @@ function offline::cluster() {
   [ ! -f ${OFFLINE_FILE} ] && { log::err "[offline]" "not found ${OFFLINE_FILE}" ; exit 1; } || true
 
   log::info "[offline]" "Unzip offline package on local."
-  tar zxf ${OFFLINE_FILE}  -C ${TMP_DIR}/ && mv ${TMP_DIR}/manifests/* ${TMP_DIR}/ || true
+  tar zxf ${OFFLINE_FILE}  -C ${TMP_DIR}/
   check::exit_code "$?" "offline"  "Unzip offline package"
  
   offline::load "master"
@@ -2705,7 +2806,7 @@ function upgrade::cluster() {
   [[ "$?" == "0" ]] && local_version="${COMMAND_OUTPUT#v}" || true
 
   local stable_version="2"
-  command::exec "${MGMT_NODE}" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"
+  command::exec "127.0.0.1" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"
   [[ "$?" == "0" ]] && stable_version="${COMMAND_OUTPUT#v}" || true
 
   if [[ "${KUBE_VERSION}" != "latest" ]]; then
