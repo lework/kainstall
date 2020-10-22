@@ -55,7 +55,7 @@ MEM: `4G`
 - 安装`network`组件，可选`flannel`，`calico`， 需在初始化时指定。
 - 安装`monitor`组件，可选`prometheus`。
 - 安装`log`组件，可选`elasticsearch`。
-- 安装`storage`组件，可选`rook`。
+- 安装`storage`组件，可选`rook`，`longhorn`。
 - 安装`web ui`组件，可选`dashboard`。
 - 升级到`kubernetes`指定版本。
 - 更新集群证书。
@@ -67,19 +67,20 @@ MEM: `4G`
 ## 默认版本
 
 
-| 软件                                             | kainstall 默认版本 | 软件最新版本                                                 |
-| ------------------------------------------------ | ------------------ | ------------------------------------------------------------ |
-| [docker-ce](https://github.com/docker/docker-ce) | latest             | ![docker-ce release](https://img.shields.io/github/v/release/docker/docker-ce?sort=semver) |
-| [kubernetes](https://github.com/kubernetes/kubernetes) | latest             | ![kubernetes release](https://img.shields.io/github/v/release/kubernetes/kubernetes?sort=semver) |
-| [flannel](https://github.com/coreos/flannel) | 0.13.0            | ![flannel release](https://img.shields.io/github/v/release/coreos/flannel) |
-| [metrics server](https://github.com/kubernetes-sigs/metrics-server) | 0.3.7             | ![metrics-server release](https://img.shields.io/github/v/release/kubernetes-sigs/metrics-server) |
-| [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.40.2            | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
-| [traefik](https://github.com/traefik/traefik) | 2.3.2            | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
-| [calico](https://github.com/projectcalico/calico)                                           | 3.16.3            | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
-| [kube_prometheus](https://github.com/prometheus-operator/kube-prometheus) | 0.6.0             | ![kube-prometheus release](https://img.shields.io/github/v/release/prometheus-operator/kube-prometheus) |
-| [elasticsearch](https://github.com/elastic/elasticsearch) | 7.9.2             | ![elasticsearch release](https://img.shields.io/github/v/release/elastic/elasticsearch?sort=semver) |
-| [rook](https://github.com/rook/rook) | 1.4.6 | ![rook release](https://img.shields.io/github/v/release/rook/rook?sort=semver) |
-| [kubernetes_dashboard](https://github.com/kubernetes/dashboard) | 2.0.4             | ![kubernetes dashboard release](https://img.shields.io/github/v/release/kubernetes/dashboard?sort=semver) |
+| 分类                                           | 软件                                             | kainstall 默认版本 | 软件最新版本                                                 |
+| ------------------------------------------------ | ------------------ | ------------------------------------------------------------ | ------------------------------------------------ |
+| common | [docker-ce](https://github.com/docker/docker-ce) | latest             | ![docker-ce release](https://img.shields.io/github/v/release/docker/docker-ce?sort=semver) |
+| common | [kubernetes](https://github.com/kubernetes/kubernetes) | latest             | ![kubernetes release](https://img.shields.io/github/v/release/kubernetes/kubernetes?sort=semver) |
+| network | [flannel](https://github.com/coreos/flannel) | 0.13.0            | ![flannel release](https://img.shields.io/github/v/release/coreos/flannel) |
+| network | [calico](https://github.com/projectcalico/calico) | 3.16.3 | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
+| addons | [metrics server](https://github.com/kubernetes-sigs/metrics-server) | 0.3.7             | ![metrics-server release](https://img.shields.io/github/v/release/kubernetes-sigs/metrics-server) |
+| ingress | [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.40.2            | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
+| ingress | [traefik](https://github.com/traefik/traefik) | 2.3.2            | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
+| monitor | [kube_prometheus](https://github.com/prometheus-operator/kube-prometheus) | 0.6.0             | ![kube-prometheus release](https://img.shields.io/github/v/release/prometheus-operator/kube-prometheus) |
+| log | [elasticsearch](https://github.com/elastic/elasticsearch) | 7.9.2             | ![elasticsearch release](https://img.shields.io/github/v/release/elastic/elasticsearch?sort=semver) |
+| storage | [rook](https://github.com/rook/rook) | 1.4.6 | ![rook release](https://img.shields.io/github/v/release/rook/rook?sort=semver) |
+| storage | [longhorn](https://github.com/longhorn/longhorn) | 1.0.2 | ![longhorn release](https://img.shields.io/github/v/release/longhorn/longhorn?sort=semver) |
+| ui | [kubernetes_dashboard](https://github.com/kubernetes/dashboard) | 2.0.4             | ![kubernetes dashboard release](https://img.shields.io/github/v/release/kubernetes/dashboard?sort=semver) |
 
 除 **kube组件** 版本可以通过参数(`--version`) 指定外，其他的软件版本需在脚本中指定。
 
@@ -125,7 +126,7 @@ Flag:
   -ui,--ui             cluster web ui, choose: [dashboard], default: dashboard
   -M,--monitor         cluster monitor, choose: [prometheus]
   -l,--log             cluster log, choose: [elasticsearch]
-  -s,--storage         cluster storage, choose: [rook]
+  -s,--storage         cluster storage, choose: [rook,longhorn]
   -U,--upgrade-kernel  upgrade kernel
   -of,--offline-file   specify the offline package file to load
   --10years            the certificate period is 10 years.

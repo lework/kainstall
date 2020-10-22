@@ -28,8 +28,9 @@ CALICO_VERSION="3.16.3"
 KUBE_PROMETHEUS_VERSION="0.6.0"
 ELASTICSEARCH_VERSION="7.9.2"
 ROOK_VERSION="1.4.6"
+LONGHORN_VERSION="1.0.2"
 KUBERNETES_DASHBOARD_VERSION="2.0.4"
- 
+
 # 集群配置
 KUBE_APISERVER="apiserver.cluster.local"
 KUBE_POD_SUBNET="10.244.0.0/16"
@@ -124,6 +125,7 @@ function log::exec() {
   echo -e "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[34mEXEC:    \033[0m$*\n" >> $LOG_FILE
 }
 
+
 function utils::version_to_number() {
   # 版本号转数字
 
@@ -164,6 +166,36 @@ function utils::quote() {
   else
     echo "$*"
   fi
+}
+
+
+function utils::download_file() {
+  # 下载文件
+  
+  local url="$1"
+  local dest="$2"
+  local unzip_tag="${3:-1}"
+  
+  local dest_dirname="$(dirname $dest)"
+  local filename="$(basename $dest)"
+  
+  log::info "[download]" "${filename}"
+  command::exec "${MGMT_NODE}" "
+    set -e
+    if [ ! -f "\"${dest}\"" ]; then
+      [ ! -d \"${dest_dirname}\" ] && mkdir -pv \"${dest_dirname}\" 
+      wget --timeout=10 --waitretry=3 --tries=5 --retry-connrefused \"${url}\" -O \"${dest}\"
+      if [[ \"${unzip_tag}\" == \"unzip\" ]]; then
+        command -v unzip 2>/dev/null || yum install -y unzip
+        unzip -o \"${dest}\" -d \"${dest_dirname}\"
+      fi
+    else
+      echo "\"${dest} is exists!\""
+    fi
+  "
+  local status="$?"
+  check::exit_code "$status" "download" "${filename}"
+  return "$status"
 }
 
 
@@ -954,13 +986,7 @@ function install::package() {
     
     log::info "[install]" "download kubeadm 10 years certs client"
     local certs_file="${OFFLINE_DIR}/bins/kubeadm-linux-amd64"
-    command::exec "127.0.0.1" "
-      if [ ! -f "\"${certs_file}\"" ]; then
-        [ ! -d \"${OFFLINE_DIR}/bins\" ] && mkdir -pv \"${OFFLINE_DIR}/bins\" 
-        wget https://gh.lework.workers.dev/https://github.com/lework/kubeadm-certs/releases/download/v${version}/kubeadm-linux-amd64 -O \"${certs_file}\"
-      fi
-    "
-    check::exit_code "$?" "install" "download kubeadm 10 years certs client"
+    MGMT_NODE="127.0.0.1" utils::download_file "https://gh.lework.workers.dev/https://github.com/lework/kubeadm-certs/releases/download/v${version}/kubeadm-linux-amd64" "${certs_file}"
     
     for host in $MASTER_NODES $WORKER_NODES
     do
@@ -1497,7 +1523,9 @@ function kube::wait() {
     --selector=$selector \
     --timeout=300s
   "
-  check::exit_code "$?" "waiting" "$app ${resource} ready"
+  local status="$?"
+  check::exit_code "$status" "waiting" "$app ${resource} ready"
+  return "$status"
 }
 
 
@@ -1514,7 +1542,9 @@ function kube::apply() {
 \$(printf \"%s\" \"\$manifest\")
 EOF
   "
-  check::exit_code "$?" "apply" "add $file"
+  local status="$?"
+  check::exit_code "$status" "apply" "add $file"
+  return "$status"
 }
 
 
@@ -1572,14 +1602,16 @@ function config::haproxy_backend() {
 function get::ingress_conn(){
   # 获取ingress连接地址
 
-  local port=${1:-80}
+  local port="${1:-80}"
+  local ingress_name="${2:-ingress-${KUBE_INGRESS}-controller}"
+  
   command::exec "${MGMT_NODE}" "
     kubectl get node --selector='node-role.kubernetes.io/worker' -o jsonpath='{range.items[*]}{ .status.addresses[?(@.type==\"InternalIP\")].address } {end}' | awk '{print \$1}'
   "
   [[ "$?" == "0" ]] && local node_ip="${COMMAND_OUTPUT}" || local node_ip="nodeIP"
 
   command::exec "${MGMT_NODE}" "
-    kubectl get svc --all-namespaces -o go-template=\"{{range .items}}{{if eq .metadata.name \\\"ingress-${KUBE_INGRESS}-controller\\\"}}{{range.spec.ports}}{{if eq .port ${port}}}{{.nodePort}}{{end}}{{end}}{{end}}{{end}}\"
+    kubectl get svc --all-namespaces -o go-template=\"{{range .items}}{{if eq .metadata.name \\\"${ingress_name}\\\"}}{{range.spec.ports}}{{if eq .port ${port}}}{{.nodePort}}{{end}}{{end}}{{end}}{{end}}\"
   "
   [[ "$?" == "0" ]] && local node_port="${COMMAND_OUTPUT}" || local node_port="nodePort"
   
@@ -1594,24 +1626,22 @@ function add::ingress() {
   local add_ingress_demo=0
 
   if [[ "$KUBE_INGRESS" == "nginx" ]]; then
-    log::info "[ingress]" "download ingress-nginx manifests"
+    log::info "[ingress]" "add ingress-nginx"
+    
     local ingress_nginx_file="${OFFLINE_DIR}/manifests/ingress-nginx.yml"
+    utils::download_file "https://cdn.jsdelivr.net/gh/kubernetes/ingress-nginx@controller-v${INGRESS_NGINX}/deploy/static/provider/baremetal/deploy.yaml" "${ingress_nginx_file}"
     command::exec "${MGMT_NODE}" "
-      if [ ! -f "\"${ingress_nginx_file}\"" ]; then
-        [ ! -d \"${OFFLINE_DIR}/manifests\" ] && mkdir -pv \"${OFFLINE_DIR}/manifests\" 
-        wget https://cdn.jsdelivr.net/gh/kubernetes/ingress-nginx@controller-v${INGRESS_NGINX}/deploy/static/provider/baremetal/deploy.yaml -O \"${ingress_nginx_file}\"
-      fi
       sed -i -e 's#k8s.gcr.io#k8sgcr.lework.workers.dev#g' \
              -e 's#@sha256:.*\$##g' '${ingress_nginx_file}'
     "
-    check::exit_code "$?" "ingress" "download ingress-nginx manifests"
+    check::exit_code "$?" "ingress" "change ingress-nginx manifests"
     kube::apply "${ingress_nginx_file}"
     
     kube::wait "ingress-nginx" "ingress-nginx" "pod" "app.kubernetes.io/component=controller"
-    add_ingress_demo=1
+    [[ "$?" == "0" ]]  && add_ingress_demo=1 || true
 
   elif [[ "$KUBE_INGRESS" == "traefik" ]]; then
-    log::info "[ingress]" "download ingress-traefik manifests"
+    log::info "[ingress]" "add ingress-traefik"
     kube::apply "traefik" """
 ---
 kind: ClusterRole
@@ -1770,8 +1800,7 @@ spec:
       targetPort: 8080
 """
     kube::wait "traefik" "default" "pod" "app=ingress-traefik-controller"
-    add_ingress_demo=1
-
+    [[ "$?" == "0" ]]  && add_ingress_demo=1 || true
   else
     log::warning "[ingress]" "No $KUBE_INGRESS config."
   fi
@@ -1780,6 +1809,7 @@ spec:
     sleep 3
     log::info "[ingress]" "add ingress default-http-backend"
     kube::apply "default-http-backend" """
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1888,8 +1918,10 @@ spec:
           serviceName: ingress-demo-app
           servicePort: 80
 """
-     local conn=$(get::ingress_conn)
-     log::access "[ingress]" "curl -H 'Host:app.demo.com' http://${conn}"
+    if [[ "$?" == "0" ]]; then
+      local conn=$(get::ingress_conn)
+      log::access "[ingress]" "curl -H 'Host:app.demo.com' http://${conn}"
+    fi
   fi
 }
 
@@ -1898,30 +1930,31 @@ function add::network() {
   # 添加network组件
 
   if [[ "$KUBE_NETWORK" == "flannel" ]]; then
-    log::info "[network]" "download flannel manifests"
+    log::info "[network]" "add flannel"
+    
     local flannel_file="${OFFLINE_DIR}/manifests/kube-flannel.yml"
+    utils::download_file "https://cdn.jsdelivr.net/gh/coreos/flannel@v${FLANNEL_VERSION}/Documentation/kube-flannel.yml" "${flannel_file}"
+    
     command::exec "${MGMT_NODE}" "
-      if [ ! -f "\"${flannel_file}\"" ]; then
-        [ ! -d \"${OFFLINE_DIR}/manifests\" ] && mkdir -pv \"${OFFLINE_DIR}/manifests\" 
-        wget https://cdn.jsdelivr.net/gh/coreos/flannel@v${FLANNEL_VERSION}/Documentation/kube-flannel.yml -O \"${flannel_file}\"
-      fi
       sed -i 's#10.244.0.0/16#$KUBE_POD_SUBNET#g' \"${flannel_file}\"
     "
-    check::exit_code "$?" "flannel" "download flannel manifests"
+    check::exit_code "$?" "flannel" "change flannel pod subnet"
     kube::apply "${flannel_file}"
 
   elif [[ "$KUBE_NETWORK" == "calico" ]]; then
-    log::info "[network]" "download calico manifests"
+    log::info "[network]" "add calico"
+    utils::download_file "https://docs.projectcalico.org/manifests/calico.yaml" "${OFFLINE_DIR}/manifests/calico.yml"
+    utils::download_file "https://docs.projectcalico.org/manifests/calicoctl.yaml" "${OFFLINE_DIR}/manifests/calicoctl.yaml"
+    
     command::exec "${MGMT_NODE}" "
-      [ ! -d \"${OFFLINE_DIR}/manifests\" ] && mkdir -pv \"${OFFLINE_DIR}/manifests\" 
-      wget https://docs.projectcalico.org/manifests/calico.yaml -O \"${OFFLINE_DIR}/manifests/calico.yml\"
-      wget https://docs.projectcalico.org/manifests/calicoctl.yaml -O \"${OFFLINE_DIR}/manifests/calicoctl.yaml\"
       sed -i "s#:v.*#:v${CALICO_VERSION}#g" \"${OFFLINE_DIR}/manifests/calico.yml\"
       sed -i "s#:v.*#:v${CALICO_VERSION}#g" \"${OFFLINE_DIR}/manifests/calicoctl.yaml\"
-      kubectl apply -f \"${OFFLINE_DIR}/manifests/calico.yaml\"
-      kubectl apply -f \"${OFFLINE_DIR}/manifests/calicoctl.yaml\"
     "
-    check::exit_code "$?" "apply" "add calico"
+    check::exit_code "$?" "network" "change calico version to ${CALICO_VERSION}"
+    
+    kube::apply "${OFFLINE_DIR}/manifests/calico.yaml"
+    kube::apply "${OFFLINE_DIR}/manifests/calicoctl.yaml"
+    
   else
     log::warning "[network]" "No $KUBE_NETWORK config."
   fi
@@ -1933,18 +1966,16 @@ function add::addon() {
 
   log::info "[addon]" "download metrics-server manifests"
   local metrics_server_file="${OFFLINE_DIR}/manifests/metrics-server.yml"
+  
+  utils::download_file "https://github.com/kubernetes-sigs/metrics-server/releases/download/v${METRICS_SERVER_VERSION}/components.yaml" "${metrics_server_file}"
 
   command::exec "${MGMT_NODE}" "
-    if [ ! -f "\"${metrics_server_file}\"" ]; then
-      [ ! -d \"${OFFLINE_DIR}/manifests\" ] && mkdir -pv \"${OFFLINE_DIR}/manifests\" 
-      wget https://github.com/kubernetes-sigs/metrics-server/releases/download/v${METRICS_SERVER_VERSION}/components.yaml -O \"${metrics_server_file}\"
-    fi
     sed -i -e 's#k8s.gcr.io/metrics-server#$KUBE_IMAGE_REPO#g' \
            -e '/--secure-port=4443/a\          - --kubelet-insecure-tls' \
            -e '/--secure-port=4443/a\          - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname' \
            \"${metrics_server_file}\"
   "
-  check::exit_code "$?" "addon" "download metrics-server manifests"
+  check::exit_code "$?" "addon" "change metrics-server parameter"
   kube::apply "${metrics_server_file}"
 }
 
@@ -1953,14 +1984,8 @@ function add::monitor() {
   # 添加监控组件
   
   if [[ "$KUBE_MONITOR" == "prometheus" ]]; then
-    log::info "[monitor]" "download prometheus manifests"
-    command::exec "${MGMT_NODE}" "
-      [ ! -d \"${OFFLINE_DIR}/manifests\" ] && mkdir -pv \"${OFFLINE_DIR}/manifests\" 
-      wget https://gh.lework.workers.dev/https://github.com/prometheus-operator/kube-prometheus/archive/v${KUBE_PROMETHEUS_VERSION}.zip -O \"${OFFLINE_DIR}/manifests/prometheus.zip\"
-      command -v unzip 2>/dev/null || yum install -y unzip
-      unzip -o \"${OFFLINE_DIR}/manifests/prometheus.zip\" -d \"${OFFLINE_DIR}/manifests/\"
-    "
-    check::exit_code "$?" "monitor" "download prometheus"
+    log::info "[monitor]" "add prometheus"
+    utils::download_file "https://gh.lework.workers.dev/https://github.com/prometheus-operator/kube-prometheus/archive/v${KUBE_PROMETHEUS_VERSION}.zip" "${OFFLINE_DIR}/manifests/prometheus.zip" "unzip"
    
     log::info "[monitor]" "apply prometheus manifests"
     command::exec "${MGMT_NODE}" "
@@ -1971,9 +1996,7 @@ function add::monitor() {
     "
     check::exit_code "$?" "apply" "add prometheus"
 
-    log::info "[monitor]" "set controller-manager and scheduler prometheus discovery service"
-    command::exec "${MGMT_NODE}" "
-      cat <<EOF | kubectl --validate=false apply -f -
+    kube::apply "controller-manager and scheduler prometheus discovery service" "
 ---
 apiVersion: v1
 kind: Service
@@ -2010,13 +2033,10 @@ spec:
     port: 10257
     targetPort: 10257
     protocol: TCP
-EOF
     "
-    check::exit_code "$?" "apply" "set controller-manager and scheduler prometheus discovery"
-
+    
     log::info "[monitor]" "add prometheus ingress"
-    command::exec "${MGMT_NODE}" "
-      cat <<EOF | kubectl --validate=false apply -f -
+    kube::apply "prometheus ingress" "
 ---
 apiVersion: extensions/v1beta1
 kind: Ingress
@@ -2065,16 +2085,12 @@ spec:
       - backend:
           serviceName: alertmanager-main
           servicePort: 9093
-EOF
     "
-    local s="$?"
-    check::exit_code "$s" "apply" "add prometheus ingress"
-    
-    if [[ "$s" == "0" ]]; then
+    if [[ "$?" == "0" ]]; then
       local conn=$(get::ingress_conn)
-      log::access "[ingress]" "curl -H 'Host:grafana.monitoring.cluster.local' ${conn}; auth: admin/admin"
-      log::access "[ingress]" "curl -H 'Host:prometheus.monitoring.cluster.local' ${conn}"
-      log::access "[ingress]" "curl -H 'Host:alertmanager.monitoring.cluster.local' ${conn}"
+      log::access "[ingress]" "curl -H 'Host:grafana.monitoring.cluster.local' http://${conn}; auth: admin/admin"
+      log::access "[ingress]" "curl -H 'Host:prometheus.monitoring.cluster.local' http://${conn}"
+      log::access "[ingress]" "curl -H 'Host:alertmanager.monitoring.cluster.local' http://${conn}"
     fi
     
   else
@@ -2088,8 +2104,7 @@ function add::log() {
 
   if [[ "$KUBE_LOG" == "elasticsearch" ]]; then
     log::info "[log]" "add elasticsearch"
-    command::exec "${MGMT_NODE}" """
-      cat <<EOF | kubectl apply -f -
+    kube::apply "elasticsearch" "
 ---
 kind: Namespace
 apiVersion: v1
@@ -2354,20 +2369,15 @@ spec:
       - name: varlibdockercontainers
         hostPath:
           path: /var/lib/docker/containers
-EOF
-    """
-    local s="$?"
-    check::exit_code "$s" "apply" "add elasticsearch"
-      
-    if [[ "$s" == "0" ]]; then
+    " 
+    if [[ "$?" == "0" ]]; then
       local conn=$(get::ingress_conn)
-      log::access "[ingress]" "curl -H 'Host:kibana.logging.cluster.local' ${conn}"
-      log::access "[ingress]" "curl -H 'Host:elasticsearch.logging.cluster.local' ${conn}"
+      log::access "[ingress]" "curl -H 'Host:kibana.logging.cluster.local' http://${conn}"
+      log::access "[ingress]" "curl -H 'Host:elasticsearch.logging.cluster.local' http://${conn}"
     fi
   else
     log::warning "[log]" "No $KUBE_LOG config."
   fi
-
 }
 
 
@@ -2377,29 +2387,66 @@ function add::storage() {
   if [[ "$KUBE_STORAGE" == "rook" ]]; then
 
     log::info "[storage]" "add rook"
-    log::info "[storage]" "download rook manifests"
-    command::exec "${MGMT_NODE}" """
-      [ ! -d \"${OFFLINE_DIR}/manifests\" ] && mkdir -pv \"${OFFLINE_DIR}/manifests\" 
-      wget https://gh.lework.workers.dev/https://github.com/rook/rook/archive/v${ROOK_VERSION}.zip -O \"${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}.zip\"
-      command -v unzip 2>/dev/null || yum install -y unzip
-      unzip -o \"${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}.zip\" -d \"${OFFLINE_DIR}/manifests/\"
-    """
-    check::exit_code "$?" "storage" "download rook manifests"
+    utils::download_file "https://gh.lework.workers.dev/https://github.com/rook/rook/archive/v${ROOK_VERSION}.zip" "${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}.zip" "unzip"
 
-    log::info "[storage]" "add rook operator"
-    command::exec "${MGMT_NODE}" """
-      cd \"${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/\" \
-      && kubectl apply -f common.yaml -f operator.yaml
-    """
-    check::exit_code "$?" "apply" "add rook operator"
+    kube::apply "${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/common.yaml"
+    kube::apply "${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/operator.yaml"
+    kube::apply "${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/cluster.yaml"
 
-    log::info "[storage]" "create ceph cluster"
-    command::exec "${MGMT_NODE}" """
-      cd \"${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/\" \
-      && kubectl apply -f cluster.yaml
-"""
-    check::exit_code "$?" "apply" "add ceph"
-
+  elif [[ "$KUBE_STORAGE" == "longhorn" ]]; then
+    log::info "[storage]" "add longhorn"
+    log::info "[storage]"  "get cluster node hosts"
+    command::exec "${MGMT_NODE}" "
+      kubectl get node -o jsonpath='{\$.items[*].status.addresses[?(@.type==\"InternalIP\")].address}'
+    "
+    local status="$?"
+    check::exit_code "$status" "storage" "get cluster node hosts" "exit"
+    [[ "$status" == "0" ]] && local cluster_nodes="${COMMAND_OUTPUT}" || true
+    
+    for host in ${cluster_nodes:-}
+    do
+      log::info "[storage]"  "${host}: install iscsi-initiator-utils"
+      command::exec "${MGMT_NODE}" "
+        yum install -y iscsi-initiator-utils
+      "
+      check::exit_code "$?" "storage" "${host}: install iscsi-initiator-utils" "exit"
+    done
+    
+    local longhorn_file="${OFFLINE_DIR}/manifests/longhorn.yaml"
+    utils::download_file "https://cdn.jsdelivr.net/gh/longhorn/longhorn@v${LONGHORN_VERSION}/deploy/longhorn.yaml" "${longhorn_file}"
+    kube::apply "${longhorn_file}"
+    
+    log::info "[storage]"  "set longhorn is default storage class"
+    command::exec "${MGMT_NODE}" "
+      default_class=\"\$(kubectl get storageclass -A -o jsonpath='{.items[?(@.metadata.annotations.storageclass\\.kubernetes\\.io/is-default-class==\\\"true\\\")].metadata.name}')\"
+      if [ \"\${default_class:-}\" != \"\" ]; then
+         kubectl patch storageclass \${default_class} -p '{\"metadata\": {\"annotations\":{\"storageclass.kubernetes.io/is-default-class\":\"false\"}}}'
+      fi
+      kubectl patch storageclass longhorn -p '{\"metadata\": {\"annotations\":{\"storageclass.kubernetes.io/is-default-class\":\"true\"}}}'
+    "
+    check::exit_code "$?" "storage" "set longhorn is default storage class"
+    
+    kube::apply "longhorn ingress" "
+---
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: longhorn-ingress
+  namespace: longhorn-system
+spec:
+  rules:
+  - host: longhorn.storage.cluster.local
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: longhorn-frontend
+          servicePort: 80
+    "
+    if [[ "$?" == "0" ]]; then
+      local conn=$(get::ingress_conn)
+      log::access "[ingress]" "curl -H 'Host:longhorn.storage.cluster.local' http://${conn}"
+    fi
   else
     log::warning "[storage]" "No $KUBE_STORAGE config."
   fi
@@ -2411,19 +2458,11 @@ function add::ui() {
 
   if [[ "$KUBE_UI" == "dashboard" ]]; then
     log::info "[ui]" "add kubernetes dashboard"
-    log::info "[ui]" "download dashboard manifests"
     local dashboard_file="${OFFLINE_DIR}/manifests/kubernetes-dashboard.yml"
-    command::exec "${MGMT_NODE}" "
-      if [ ! -f "\"${dashboard_file}\"" ]; then
-        [ ! -d \"${OFFLINE_DIR}/manifests\" ] && mkdir -pv \"${OFFLINE_DIR}/manifests\" 
-        wget https://cdn.jsdelivr.net/gh/kubernetes/dashboard@v${KUBERNETES_DASHBOARD_VERSION}/aio/deploy/recommended.yaml -O \"${dashboard_file}\"
-      fi
-    "
-    check::exit_code "$?" "ui" "download dashboard manifests"
+    utils::download_file "https://cdn.jsdelivr.net/gh/kubernetes/dashboard@v${KUBERNETES_DASHBOARD_VERSION}/aio/deploy/recommended.yaml" "${dashboard_file}"
     kube::apply "${dashboard_file}"
-
-    command::exec "${MGMT_NODE}" """
-      cat <<EOF | kubectl apply -f -
+    kube::apply "kubernetes dashboard ingress" "
+---
 apiVersion: extensions/v1beta1
 kind: Ingress
 metadata:
@@ -2467,20 +2506,16 @@ fi
         backend:
           serviceName: kubernetes-dashboard
           servicePort: 443
-EOF
-    """
-    local s="$?"
-    check::exit_code "$s" "apply" "add kubernetes dashboard ingress"
-      
-    if [[ "$s" == "0" ]]; then
+    "
+    if [[ "$?" == "0" ]]; then
       local conn=$(get::ingress_conn "443")
-      log::access "[ingress]" "curl -H 'Host:kubernetes-dashboard.cluster.local' https://${conn}"
+      log::access "[ingress]" "curl --insecure -H 'Host:kubernetes-dashboard.cluster.local' https://${conn}"
 
       command::exec "${MGMT_NODE}" "
         kubectl create serviceaccount kubernetes-dashboard-admin-sa -n kubernetes-dashboard
         kubectl create clusterrolebinding kubernetes-dashboard-admin-sa --clusterrole=cluster-admin --serviceaccount=kubernetes-dashboard:kubernetes-dashboard-admin-sa -n kubernetes-dashboard
       "
-      s="$?"
+      local s="$?"
       check::exit_code "$s" "ui" "create kubernetes dashboard admin service account"
       command::exec "${MGMT_NODE}" "
         kubectl describe secrets \$(kubectl describe sa kubernetes-dashboard-admin-sa -n kubernetes-dashboard | awk '/Tokens/ {print \$2}') -n kubernetes-dashboard | awk '/token:/{print \$2}'
@@ -2784,16 +2819,18 @@ function del::node() {
  
   config::haproxy_backend "remove"
 
+  local cluster_nodes=""
+  command::exec "${MGMT_NODE}" "
+     kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {.metadata.name }\\n{end}'
+  "
+  [[ "$?" == "0" ]] && cluster_nodes="${COMMAND_OUTPUT}" || true
+
   for host in $MASTER_NODES $WORKER_NODES
   do
     log::info "[del]" "node $host"
 
-    command::exec "${MGMT_NODE}" "
-      kubectl get node -o wide | grep $host | awk '{print \$1}'
-    "
-    [[ "$?" == "0" ]] && local node_name="${COMMAND_OUTPUT}" || true
-
-    if [[ "${node_name:-}" == "" ]]; then
+    local node_name=$(printf "${cluster_nodes}" | grep ${host} | awk '{print $2}' )
+    if [[ "${node_name}" == "" ]]; then
       log::warning "[del]" "node $host not found."
     else
       log::info "[del]" "drain $host"
@@ -2805,10 +2842,20 @@ function del::node() {
       check::exit_code "$?" "del" "$host: delete"
       sleep 3
     fi
-
     reset::node "$host"
   done
 
+  for host in $(printf "${cluster_nodes}" | awk '{print $1}')
+  do
+     log::info "[del]" "$host: remove del node hostname resolution"
+     command::exec "${host}" "
+       for h in $MASTER_NODES $WORKER_NODES
+       do
+         sed -i \"/\$h/d\" /etc/hosts
+       done
+     "
+     check::exit_code "$?" "del" "remove del node hostname resolution"
+  done
   kube::status
 }
 
@@ -2913,7 +2960,7 @@ Flag:
   -ui,--ui             cluster web ui, choose: [dashboard], default: ${KUBE_UI}
   -M,--monitor         cluster monitor, choose: [prometheus]
   -l,--log             cluster log, choose: [elasticsearch]
-  -s,--storage         cluster storage, choose: [rook]
+  -s,--storage         cluster storage, choose: [rook,longhorn]
   -U,--upgrade-kernel  upgrade kernel
   -of,--offline-file   specify the offline package file to load
   --10years            the certificate period is 10 years.
