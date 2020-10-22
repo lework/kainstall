@@ -134,7 +134,7 @@ Flag:
   --sudo-password      sudo user password
 
 Example:
-  [cluster node]
+  [init cluster]
   kainstall.sh init \
   --master 192.168.77.130,192.168.77.131,192.168.77.132 \
   --worker 192.168.77.133,192.168.77.134,192.168.77.135 \
@@ -142,7 +142,7 @@ Example:
   --password 123456 \
   --version 1.19.3
 
-  [cluster node]
+  [reset cluster]
   kainstall.sh reset \
   --user root \
   --password 123456
@@ -163,8 +163,8 @@ Example:
   --password 123456
  
   [other]
-  kainstall.sh renew-cert
-  kainstall.sh upgrade --version 1.19.3
+  kainstall.sh renew-cert --user root --password 123456
+  kainstall.sh upgrade --version 1.19.3 --user root --password 123456
   kainstall.sh add --ingress traefik
   kainstall.sh add --monitor prometheus
   kainstall.sh add --log elasticsearch

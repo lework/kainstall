@@ -2560,8 +2560,12 @@ spec:
               readOnly: true
             - name: backup
               mountPath: /backup
-            - name: localtime
-              mountPath: /etc/localtime
+            - name: etc
+              mountPath: /etc
+            - name: bin
+              mountPath: /usr/bin
+            - name: lib64
+              mountPath: /lib64
           dnsPolicy: ClusterFirst
           hostNetwork: true
           nodeSelector:
@@ -2582,9 +2586,15 @@ spec:
             hostPath:
               path: /var/lib/etcd/backups
               type: DirectoryOrCreate
-          - name: localtime
+          - name: etc
             hostPath:
-              path: /etc/localtime
+              path: /etc
+          - name: bin
+            hostPath:
+              path: /usr/bin
+          - name: lib64
+            hostPath:
+              path: /lib64
 """
   log::access "[ops]" "etcd backup directory: /var/lib/etcd/backups"
 }
@@ -2912,7 +2922,7 @@ Flag:
   --sudo-password      sudo user password
 
 Example:
-  [cluster node]
+  [init cluster]
   $0 init \\
   --master 192.168.77.130,192.168.77.131,192.168.77.132 \\
   --worker 192.168.77.133,192.168.77.134,192.168.77.135 \\
@@ -2920,7 +2930,7 @@ Example:
   --password 123456 \\
   --version 1.19.3
 
-  [cluster node]
+  [reset cluster]
   $0 reset \\
   --user root \\
   --password 123456
@@ -2941,8 +2951,8 @@ Example:
   --password 123456
  
   [other]
-  $0 renew-cert
-  $0 upgrade --version 1.19.3
+  $0 renew-cert --user root --password 123456
+  $0 upgrade --version 1.19.3 --user root --password 123456
   $0 add --ingress traefik
   $0 add --monitor prometheus
   $0 add --log elasticsearch
