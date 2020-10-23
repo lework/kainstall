@@ -56,7 +56,7 @@ MEM: `4G`
 - 安装`monitor`组件，可选`prometheus`。
 - 安装`log`组件，可选`elasticsearch`。
 - 安装`storage`组件，可选`rook`，`longhorn`。
-- 安装`web ui`组件，可选`dashboard`。
+- 安装`web ui`组件，可选`dashboard`, `kubesphere`。
 - 升级到`kubernetes`指定版本。
 - 更新集群证书。
 - 添加运维操作，如备份etcd快照。
@@ -81,6 +81,8 @@ MEM: `4G`
 | storage | [rook](https://github.com/rook/rook) | 1.4.6 | ![rook release](https://img.shields.io/github/v/release/rook/rook?sort=semver) |
 | storage | [longhorn](https://github.com/longhorn/longhorn) | 1.0.2 | ![longhorn release](https://img.shields.io/github/v/release/longhorn/longhorn?sort=semver) |
 | ui | [kubernetes_dashboard](https://github.com/kubernetes/dashboard) | 2.0.4             | ![kubernetes dashboard release](https://img.shields.io/github/v/release/kubernetes/dashboard?sort=semver) |
+| ui | [kubesphere](https://github.com/kubesphere/kubesphere) | 3.0.0            | ![kubesphere release](https://img.shields.io/github/v/release/kubesphere/kubesphere?sort=semver) |
+
 
 除 **kube组件** 版本可以通过参数(`--version`) 指定外，其他的软件版本需在脚本中指定。
 
@@ -123,7 +125,7 @@ Flag:
   -v,--version         kube version, default: latest
   -n,--network         cluster network, choose: [flannel,calico], default: flannel
   -i,--ingress         ingress controller, choose: [nginx,traefik], default: nginx
-  -ui,--ui             cluster web ui, choose: [dashboard], default: dashboard
+  -ui,--ui             cluster web ui, choose: [dashboard,kubesphere], default: dashboard
   -M,--monitor         cluster monitor, choose: [prometheus]
   -l,--log             cluster log, choose: [elasticsearch]
   -s,--storage         cluster storage, choose: [rook,longhorn]

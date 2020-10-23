@@ -30,6 +30,7 @@ ELASTICSEARCH_VERSION="7.9.2"
 ROOK_VERSION="1.4.6"
 LONGHORN_VERSION="1.0.2"
 KUBERNETES_DASHBOARD_VERSION="2.0.4"
+KUBESPHERE_VERSION="3.0.0"
 
 # 集群配置
 KUBE_APISERVER="apiserver.cluster.local"
@@ -140,7 +141,7 @@ function utils::retry {
   shift
 
   local count=0
-  until eval "$@"; do
+  until eval "$*"; do
     exit=$?
     wait=$((2 ** $count))
     count=$(($count + 1))
@@ -224,8 +225,8 @@ function command::exec() {
     local status=$?
   else
     # 远程执行
-    log::exec "[command]" "sshpass -p zzzzzz ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c $(printf "%s" "${command//${SUDO_PASSWORD:-}/zzzzzz}")"
-    COMMAND_OUTPUT=$(sshpass -p ${SSH_PASSWORD} ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c "${command}" 2>> $LOG_FILE | tee -a $LOG_FILE)
+    log::exec "[command]" "sshpass -p \"zzzzzz\" ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c $(printf "%s" "${command//${SUDO_PASSWORD:-}/zzzzzz}")"
+    COMMAND_OUTPUT=$(sshpass -p "${SSH_PASSWORD}" ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c "${command}" 2>> $LOG_FILE | tee -a $LOG_FILE)
     local status=$?
   fi
   return $status
@@ -680,6 +681,10 @@ function script::upgrage_kube() {
   kubectl version --client=true
   yum install -y kubelet${version} kubectl${version} --disableexcludes=kubernetes
   kubectl version --client=true
+
+  [ -f /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf ] && \
+    sed -i 's#^\[Service\]#[Service]\nCPUAccounting=true\nMemoryAccounting=true#g' /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
+
   systemctl daemon-reload
   systemctl restart kubelet
 }
@@ -779,6 +784,11 @@ EOF
   [ -d /etc/bash_completion.d ] && \
     { kubectl completion bash > /etc/bash_completion.d/kubectl; \
       kubeadm completion bash > /etc/bash_completion.d/kubadm; }
+
+  [ -f /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf ] && \
+    sed -i 's#^\[Service\]#[Service]\nCPUAccounting=true\nMemoryAccounting=true#g' /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
+  systemctl daemon-reload
+
   systemctl enable kubelet
   systemctl restart kubelet
 }
@@ -927,14 +937,16 @@ function check::preflight() {
   check::os
 
   # check apiserver conn
-  [[ "x${INIT_TAG:-}" != "x1" && "x${RESET_TAG:-}" != "x1" ]] && check::apiserver_conn || true
+  if [[ $(( ${ADD_TAG:-0} + ${DEL_TAG:-0} + ${UPGRADE_TAG:-0} + ${RENEW_CERT_TAG:-0} )) -gt 0 ]]; then
+    check::apiserver_conn
+  fi
 
 }
 
 
 function install::package() {
   # 安装包
-  
+ 
   for host in $MASTER_NODES $WORKER_NODES
   do
     # install docker
@@ -955,14 +967,14 @@ function install::package() {
   local apiservers=$MASTER_NODES
   if [[ "$apiservers" == "127.0.0.1" ]]; then
     command::exec "${MGMT_NODE}" "ip -o route get to 8.8.8.8 | sed -n 's/.*src \([0-9.]\+\).*/\1/p'"
-    [[ "$?" == "0" ]] && apiservers="${COMMAND_OUTPUT}" || true
+    get::command_output "apiservers" "$?"
   fi
 
   if [[ "x${ADD_TAG:-}" == "x1" ]]; then
     command::exec "${MGMT_NODE}" "
       kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{$.items[*].status.addresses[?(@.type==\"InternalIP\")].address}'
     "
-    [[ "$?" == "0" ]] && apiservers="${COMMAND_OUTPUT}" || true
+    get::command_output "apiservers" "$?"
   fi
   
   for host in $WORKER_NODES
@@ -995,9 +1007,10 @@ function install::package() {
       check::exit_code "$?" "install" "scp kubeadm client to $host" "exit"
 
       command::exec "${host}" "
+        set -e
         if [[ -f /tmp/kubeadm-linux-amd64 ]]; then
-	      [[ -f /usr/bin/kubeadm && ! -f /usr/bin/kubeadm_src ]] && mv -fv /usr/bin/kubeadm{,_src} || true && \
-          mv -fv /tmp/kubeadm-linux-amd64 /usr/bin/kubeadm && \
+	      [[ -f /usr/bin/kubeadm && ! -f /usr/bin/kubeadm_src ]] && mv -fv /usr/bin/kubeadm{,_src} || true
+          mv -fv /tmp/kubeadm-linux-amd64 /usr/bin/kubeadm
           chmod +x /usr/bin/kubeadm
         else
           echo \"not found /tmp/kubeadm-linux-amd64\"
@@ -1047,7 +1060,7 @@ function cert::renew_node() {
   command::exec "${MGMT_NODE}" "
     kubectl get node --selector='node-role.kubernetes.io/${role}' -o jsonpath='{range.items[*]}{.metadata.name } {end}'
   "
-  [[ "$?" == "0" ]] && hosts="${COMMAND_OUTPUT}" || true
+  get::command_output "hosts" "$?"
   
   for host in ${hosts}
   do
@@ -1096,9 +1109,7 @@ function cert::renew_node() {
     command::exec "${MGMT_NODE}" "
       kubeadm alpha kubeconfig user --org system:nodes --client-name system:node:${host}
     "
-    local status="$?"
-    [[ "$status" == "0" ]] && kubelet_config="${COMMAND_OUTPUT}" || true
-    check::exit_code "$status" "cert" "get kubelet config"
+    get::command_output "kubelet_config" "$?" "exit"
 
     if [[ "$kubelet_config" != "" ]]; then
       log::info "[cert]" "copy kubelet config"
@@ -1220,24 +1231,24 @@ function init::add_node() {
   command::exec "${MGMT_NODE}" "
     kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address } {end}' | awk '{print \$1}'
   "
-  [[ "$?" == "0" ]] && MGMT_NODE="${COMMAND_OUTPUT}" || true
+  get::command_output "MGMT_NODE" "$?" "exit"
 
   # 获取现有集群节点主机名
   command::exec "${MGMT_NODE}" "
     kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {.metadata.name }\\n{end}'
   "
-  [[ "$?" == "0" ]] && local node_hosts="${COMMAND_OUTPUT}" || true
+  get::command_output "node_hosts" "$?" "exit"
   
   # 获取节点索引
   command::exec "${MGMT_NODE}" "
     kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
   "
-  [[ "$?" == "0" ]] && master_index="${COMMAND_OUTPUT}" || true
+  get::command_output "master_index" "$?" "exit"
     
   command::exec "${MGMT_NODE}" "
     kubectl get node --selector='!node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
   "
-  [[ "$?" == "0" ]] && worker_index="${COMMAND_OUTPUT}" || true
+  get::command_output "worker_index" "$?" "exit"
   
   master_index=$(( master_index + 1 ))
   worker_index=$(( worker_index + 1 ))
@@ -1453,19 +1464,19 @@ function kubeadm::join() {
   command::exec "${MGMT_NODE}" "
     openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //'
   "
-  [[ "$?" == "0" ]] && CACRT_HASH="${COMMAND_OUTPUT}" || { log::err "kubeadm join" "master: get CACRT_HASH failed"; exit 1; }
+  get::command_output "CACRT_HASH" "$?" "exit"
   
   log::info "[kubeadm join]" "master: get INTI_CERTKEY"
   command::exec "${MGMT_NODE}" "
-    kubeadm init phase upload-certs --upload-certs 2>> $LOG_FILE | tail -1
+    kubeadm init phase upload-certs --upload-certs 2>> /dev/null | tail -1
   "
-  [[ "$?" == "0" ]] && INTI_CERTKEY="${COMMAND_OUTPUT}" || { log::err "kubeadm join" "master: get INTI_CERTKEY failed"; exit 1; }
+  get::command_output "INTI_CERTKEY" "$?" "exit"
   
   log::info "[kubeadm join]" "master: get INIT_TOKEN"
   command::exec "${MGMT_NODE}" "
     kubeadm token create
   "
-  [[ "$?" == "0" ]] && INIT_TOKEN="${COMMAND_OUTPUT}" || { log::err "kubeadm join" "master: get INIT_TOKEN failed"; exit 1; }
+  get::command_output "INIT_TOKEN" "$?" "exit"
   
   for host in $MASTER_NODES
   do
@@ -1513,7 +1524,7 @@ function kube::wait() {
   local app=$1
   local namespace=$2
   local resource=$3
-  local selector=$4
+  local selector=${4:-}
 
   sleep 3
   log::info "[waiting]" "waiting $app"
@@ -1537,10 +1548,14 @@ function kube::apply() {
   log::info "[apply]" "$file"
   command::exec "${MGMT_NODE}" "
     $(declare -f utils::retry)
-    [ -f \"$file\" ] && manifest=\$(cat \"$file\") || manifest=\"${2:-}\"
-    utils::retry 5 cat <<EOF | kubectl apply --wait=true --timeout=10s -f -
-\$(printf \"%s\" \"\$manifest\")
+    if [ -f \"$file\" ]; then
+      utils::retry 6 kubectl apply --wait=true --timeout=10s -f \"$file\"
+    else
+      utils::retry 6 \"cat <<EOF | kubectl apply --wait=true --timeout=10s -f -
+\$(printf \"%s\" \"${2:-}\")
 EOF
+      \"
+    fi
   "
   local status="$?"
   check::exit_code "$status" "apply" "add $file"
@@ -1573,7 +1588,7 @@ function config::haproxy_backend() {
     command::exec "${MGMT_NODE}" "
       kubectl get node --selector='!node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].status.addresses[?(@.type==\"InternalIP\")].address}'
     "
-    [[ "$?" == "0" ]] && local work_nodes="${COMMAND_OUTPUT}"
+    get::command_output "work_nodes" "$?" "exit"
     
     for host in ${work_nodes:-}
     do
@@ -1599,6 +1614,24 @@ function config::haproxy_backend() {
 }
 
 
+function get::command_output() {
+   # 获取命令的返回值
+
+   local app="$1"
+   local status="$2"
+   local is_exit="${3:-}"
+   
+   if [[ "$status" == "0" && "${COMMAND_OUTPUT}" != "" ]]; then
+     log::info "[command]" "get $app value succeeded."
+     eval "$app=\"${COMMAND_OUTPUT}\""
+   else
+     log::err "[command]" "get $app value failed."
+     [[ "$is_exit" == "exit" ]] && exit $status || true
+   fi
+   return "$status"
+}
+
+
 function get::ingress_conn(){
   # 获取ingress连接地址
 
@@ -1608,14 +1641,15 @@ function get::ingress_conn(){
   command::exec "${MGMT_NODE}" "
     kubectl get node --selector='node-role.kubernetes.io/worker' -o jsonpath='{range.items[*]}{ .status.addresses[?(@.type==\"InternalIP\")].address } {end}' | awk '{print \$1}'
   "
-  [[ "$?" == "0" ]] && local node_ip="${COMMAND_OUTPUT}" || local node_ip="nodeIP"
+  get::command_output "node_ip" "$?"
 
   command::exec "${MGMT_NODE}" "
     kubectl get svc --all-namespaces -o go-template=\"{{range .items}}{{if eq .metadata.name \\\"${ingress_name}\\\"}}{{range.spec.ports}}{{if eq .port ${port}}}{{.nodePort}}{{end}}{{end}}{{end}}{{end}}\"
   "
-  [[ "$?" == "0" ]] && local node_port="${COMMAND_OUTPUT}" || local node_port="nodePort"
   
-  echo "${node_ip}:${node_port}"
+  get::command_output "node_port" "$?"
+ 
+  INGRESS_CONN="${node_ip:-nodeIP}:${node_port:-nodePort}"
 
 }
 
@@ -1919,8 +1953,8 @@ spec:
           servicePort: 80
 """
     if [[ "$?" == "0" ]]; then
-      local conn=$(get::ingress_conn)
-      log::access "[ingress]" "curl -H 'Host:app.demo.com' http://${conn}"
+      get::ingress_conn
+      log::access "[ingress]" "curl -H 'Host:app.demo.com' http://${INGRESS_CONN}"
     fi
   fi
 }
@@ -2087,10 +2121,10 @@ spec:
           servicePort: 9093
     "
     if [[ "$?" == "0" ]]; then
-      local conn=$(get::ingress_conn)
-      log::access "[ingress]" "curl -H 'Host:grafana.monitoring.cluster.local' http://${conn}; auth: admin/admin"
-      log::access "[ingress]" "curl -H 'Host:prometheus.monitoring.cluster.local' http://${conn}"
-      log::access "[ingress]" "curl -H 'Host:alertmanager.monitoring.cluster.local' http://${conn}"
+      get::ingress_conn
+      log::access "[ingress]" "curl -H 'Host:grafana.monitoring.cluster.local' http://${INGRESS_CONN}; auth: admin/admin"
+      log::access "[ingress]" "curl -H 'Host:prometheus.monitoring.cluster.local' http://${INGRESS_CONN}"
+      log::access "[ingress]" "curl -H 'Host:alertmanager.monitoring.cluster.local' http://${INGRESS_CONN}"
     fi
     
   else
@@ -2371,9 +2405,9 @@ spec:
           path: /var/lib/docker/containers
     " 
     if [[ "$?" == "0" ]]; then
-      local conn=$(get::ingress_conn)
-      log::access "[ingress]" "curl -H 'Host:kibana.logging.cluster.local' http://${conn}"
-      log::access "[ingress]" "curl -H 'Host:elasticsearch.logging.cluster.local' http://${conn}"
+      get::ingress_conn
+      log::access "[ingress]" "curl -H 'Host:kibana.logging.cluster.local' http://${INGRESS_CONN}"
+      log::access "[ingress]" "curl -H 'Host:elasticsearch.logging.cluster.local' http://${INGRESS_CONN}"
     fi
   else
     log::warning "[log]" "No $KUBE_LOG config."
@@ -2399,9 +2433,7 @@ function add::storage() {
     command::exec "${MGMT_NODE}" "
       kubectl get node -o jsonpath='{\$.items[*].status.addresses[?(@.type==\"InternalIP\")].address}'
     "
-    local status="$?"
-    check::exit_code "$status" "storage" "get cluster node hosts" "exit"
-    [[ "$status" == "0" ]] && local cluster_nodes="${COMMAND_OUTPUT}" || true
+    get::command_output "cluster_nodes" "$?" "exit"
     
     for host in ${cluster_nodes:-}
     do
@@ -2414,7 +2446,14 @@ function add::storage() {
     
     local longhorn_file="${OFFLINE_DIR}/manifests/longhorn.yaml"
     utils::download_file "https://cdn.jsdelivr.net/gh/longhorn/longhorn@v${LONGHORN_VERSION}/deploy/longhorn.yaml" "${longhorn_file}"
+
+    command::exec "${MGMT_NODE}" "
+      sed -i 's#numberOfReplicas: \"3\"#numberOfReplicas: \"1\"#g' \"${longhorn_file}\"
+    "
+    check::exit_code "$?" "storage" "set longhorn numberOfReplicas is 1"
+
     kube::apply "${longhorn_file}"
+    kube::wait "longhorn" "longhorn-system" "pods --all"
     
     log::info "[storage]"  "set longhorn is default storage class"
     command::exec "${MGMT_NODE}" "
@@ -2444,8 +2483,8 @@ spec:
           servicePort: 80
     "
     if [[ "$?" == "0" ]]; then
-      local conn=$(get::ingress_conn)
-      log::access "[ingress]" "curl -H 'Host:longhorn.storage.cluster.local' http://${conn}"
+      get::ingress_conn
+      log::access "[ingress]" "curl -H 'Host:longhorn.storage.cluster.local' http://${INGRESS_CONN}"
     fi
   else
     log::warning "[storage]" "No $KUBE_STORAGE config."
@@ -2508,8 +2547,8 @@ fi
           servicePort: 443
     "
     if [[ "$?" == "0" ]]; then
-      local conn=$(get::ingress_conn "443")
-      log::access "[ingress]" "curl --insecure -H 'Host:kubernetes-dashboard.cluster.local' https://${conn}"
+      get::ingress_conn "443"
+      log::access "[ingress]" "curl --insecure -H 'Host:kubernetes-dashboard.cluster.local' https://${INGRESS_CONN}"
 
       command::exec "${MGMT_NODE}" "
         kubectl create serviceaccount kubernetes-dashboard-admin-sa -n kubernetes-dashboard
@@ -2520,11 +2559,28 @@ fi
       command::exec "${MGMT_NODE}" "
         kubectl describe secrets \$(kubectl describe sa kubernetes-dashboard-admin-sa -n kubernetes-dashboard | awk '/Tokens/ {print \$2}') -n kubernetes-dashboard | awk '/token:/{print \$2}'
       "
-      s="$?"
-      check::exit_code "$s" "ui" "get kubernetes dashboard admin token"
-      [[ "$s" == "0" ]] && log::access "[Token]" "${COMMAND_OUTPUT}"
+      get::command_output "dashboard_token" "$?"
+      [[ "$dashboard_token" != "" ]] && log::access "[Token]" "${dashboard_token}" || true
     fi
+  elif [[ "$KUBE_UI" == "kubesphere" ]]; then
+    log::info "[ui]" "add kubesphere"
+    utils::download_file "https://cdn.jsdelivr.net/gh/kubesphere/ks-installer@v${KUBESPHERE_VERSION}/deploy/kubesphere-installer.yaml" "${OFFLINE_DIR}/manifests/kubesphere-installer.yaml"
+    utils::download_file "https://cdn.jsdelivr.net/gh/kubesphere/ks-installer@v${KUBESPHERE_VERSION}/deploy/cluster-configuration.yaml" "${OFFLINE_DIR}/manifests/cluster-configuration.yaml"
+    kube::apply "${OFFLINE_DIR}/manifests/kubesphere-installer.yaml"
+    kube::apply "${OFFLINE_DIR}/manifests/cluster-configuration.yaml"
 
+    sleep 60
+    kube::wait "kubesphere-system" "kubesphere-system" "pods --all"
+    kube::wait "kubesphere-monitoring-system" "kubesphere-monitoring-system" "pods --all" 
+    kube::wait "kubesphere-controls-system" "kubesphere-controls-system" "pods --all" 
+
+    if [[ "$?" == "0" ]]; then
+      command::exec "${MGMT_NODE}" "
+        kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address } {end}' | awk '{print \$1}'
+      "
+      get::command_output "node_ip" "$?"
+      log::access "[service]" "curl http://${node_ip:-NodeIP}:30880;  auth: admin/P@88w0rd"
+    fi
   else
     log::warning "[ui]" "No $KUBE_UI config."
   fi
@@ -2649,7 +2705,7 @@ function reset::node() {
     sed -i '/## Kainstall managed start/,/## Kainstall managed end/d' /etc/security/limits.conf /etc/systemd/system.conf /etc/bashrc /etc/rc.local
     iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X
     [ -d /var/lib/kubelet ] && find /var/lib/kubelet | xargs -n 1 findmnt -n -t tmpfs -o TARGET -T | uniq | xargs -r umount -v
-    rm -rf /etc/kubernetes/* /var/lib/etcd/* \$HOME/.kube /etc/cni/net.d/* /var/lib/elasticsearch/*
+    rm -rf /etc/kubernetes/* /var/lib/etcd/* \$HOME/.kube /etc/cni/net.d/* /var/lib/elasticsearch/* /var/lib/longhorn/*
     docker rm -f -v \$(docker ps | grep kube | awk '{print \$1}') || echo 0
     systemctl restart docker
     ipvsadm --clear || echo 0
@@ -2665,14 +2721,14 @@ function reset::node() {
 function reset::cluster() {
   # 重置所有节点
   
-  local all_node="${MASTER_NODES} ${WORKER_NODES}"
+  local all_node=""
   
   command::exec "${MGMT_NODE}" "
     kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {end}'
   "
-  [[ "$?" == "0" ]] && all_node="${all_node} ${COMMAND_OUTPUT}" || true
+  get::command_output "all_node" "$?" "exit"
   
-  all_node=$(echo "${all_node}" | awk '{for (i=1;i<=NF;i++) if (!a[$i]++) printf("%s%s",$i,FS)}')
+  all_node=$(echo "${MASTER_NODES} ${WORKER_NODES} ${all_node}" | awk '{for (i=1;i<=NF;i++) if (!a[$i]++) printf("%s%s",$i,FS)}')
 
   for host in $all_node
   do
@@ -2784,13 +2840,17 @@ function init::cluster() {
   add::addon
   # 7. 添加ingress
   add::ingress
-  # 8. 添加web ui
+  # 8. 添加storage
+  [[ "x${STORAGE_TAG:-}" == "x1" ]] && add::storage || true
+  # 9. 添加web ui
   add::ui
-  # 9. 添加monitor
+  # 10. 添加monitor
   [[ "x${MONITOR_TAG:-}" == "x1" ]] && add::monitor || true
-  # 10. 运维操作
+  # 11. 添加monitor
+  [[ "x${LOG_TAG:-}" == "x1" ]] && add::log || true
+  # 12. 运维操作
   add::ops
-  # 11. 查看集群状态
+  # 13. 查看集群状态
   kube::status
 }
 
@@ -2800,6 +2860,14 @@ function add::node() {
   
   # 加载离线包
   [[ "${OFFLINE_TAG:-}" == "1" ]] && offline::cluster || true
+
+  # KUBE_VERSION未指定时，获取集群的版本
+  if [[ "${KUBE_VERSION}" == "" || "${KUBE_VERSION}" == "latest" ]]; then
+    command::exec "${MGMT_NODE}" "
+      kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{range.items[*]}{.status.nodeInfo.kubeletVersion } {end}' | awk -F'v| ' '{print \$2}'
+  "
+    get::command_output "KUBE_VERSION" "$?" "exit"
+  fi
 
   # 1. 初始化节点
   init::add_node
@@ -2823,7 +2891,7 @@ function del::node() {
   command::exec "${MGMT_NODE}" "
      kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {.metadata.name }\\n{end}'
   "
-  [[ "$?" == "0" ]] && cluster_nodes="${COMMAND_OUTPUT}" || true
+  get::command_output "cluster_nodes" "$?" exit
 
   for host in $MASTER_NODES $WORKER_NODES
   do
@@ -2867,11 +2935,13 @@ function upgrade::cluster() {
 
   local local_version=""
   command::exec "${MGMT_NODE}" "kubeadm version -o short"
-  [[ "$?" == "0" ]] && local_version="${COMMAND_OUTPUT#v}" || true
+  get::command_output "local_version" "$?"
+  [ "$?" == "0" ]] && local_version="${local_version#v}" || true
 
   local stable_version="2"
   command::exec "127.0.0.1" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"
-  [[ "$?" == "0" ]] && stable_version="${COMMAND_OUTPUT#v}" || true
+  get::command_output "stable_version" "$?"
+  [[ "$?" == "0" ]] && stable_version="${stable_version#v}" || true
 
   if [[ "${KUBE_VERSION}" != "latest" ]]; then
     if [[ "${KUBE_VERSION}" == "${local_version}" ]];then
@@ -2899,7 +2969,7 @@ function upgrade::cluster() {
   command::exec "${MGMT_NODE}" "
     kubectl get node -o jsonpath='{range.items[*]}{.metadata.name } {end}'
   "
-  [[ "$?" == "0" ]] && node_hosts="${COMMAND_OUTPUT}" || true
+  get::command_output "node_hosts" "$?" exit
 
   local plan=0
   for host in ${node_hosts}
@@ -2957,7 +3027,7 @@ Flag:
   -v,--version         kube version, default: ${KUBE_VERSION}
   -n,--network         cluster network, choose: [flannel,calico], default: ${KUBE_NETWORK}
   -i,--ingress         ingress controller, choose: [nginx,traefik], default: ${KUBE_INGRESS}
-  -ui,--ui             cluster web ui, choose: [dashboard], default: ${KUBE_UI}
+  -ui,--ui             cluster web ui, choose: [dashboard,kubesphere], default: ${KUBE_UI}
   -M,--monitor         cluster monitor, choose: [prometheus]
   -l,--log             cluster log, choose: [elasticsearch]
   -s,--storage         cluster storage, choose: [rook,longhorn]
@@ -3113,9 +3183,9 @@ if [[ "x${INIT_TAG:-}" == "x1" ]]; then
 elif [[ "x${ADD_TAG:-}" == "x1" ]]; then
   [[ "x${NETWORK_TAG:-}" == "x1" ]] && { add::network; add=1; } || true
   [[ "x${INGRESS_TAG:-}" == "x1" ]] && { add::ingress; add=1; } || true
+  [[ "x${STORAGE_TAG:-}" == "x1" ]] && { add::storage; add=1; } || true
   [[ "x${MONITOR_TAG:-}" == "x1" ]] && { add::monitor; add=1; } || true
   [[ "x${LOG_TAG:-}" == "x1" ]] && { add::log; add=1; } || true
-  [[ "x${STORAGE_TAG:-}" == "x1" ]] && { add::storage; add=1; } || true
   [[ "x${UI_TAG:-}" == "x1" ]] && { add::ui; add=1; } || true
   [[ "$MASTER_NODES" != "" || "$WORKER_NODES" != "" ]] && { add::node; add=1; } || true
   [[ "${add:-}" != "1" ]] && help::usage || true
