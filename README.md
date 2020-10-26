@@ -186,6 +186,7 @@ bash kainstall.sh init \
   --port 22 \
   --version 1.19.3
 ```
+> 默认情况下，除了初始化集群外，还会安装 `ingress: nginx` , `ui: dashboard` 两个组件。
 
 还可以使用一键安装方式, 连下载都省略了。
 
@@ -262,6 +263,55 @@ bash kainstall.sh upgrade --version 1.19.3
 
 # 重新颁发证书
 bash kainstall.sh renew-cert
+```
+
+### 默认设置
+
+**注意:** 以下变量都在脚本文件的`environment configuration`部分。可根据需要自行修改，或者为变量设置同名的**环境变量**修改其默认内容。
+
+```bash
+# 版本
+DOCKER_VERSION="${DOCKER_VERSION:-latest}"
+KUBE_VERSION="${KUBE_VERSION:-latest}"
+FLANNEL_VERSION="${FLANNEL_VERSION:-0.13.0}"
+METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.3.7}"
+INGRESS_NGINX="${INGRESS_NGINX:-0.40.2}"
+TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.3.2}"
+CALICO_VERSION="${CALICO_VERSION:-3.16.3}"
+KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.6.0}"
+ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.9.2}"
+ROOK_VERSION="${ROOK_VERSION:-1.4.6}"
+LONGHORN_VERSION="${LONGHORN_VERSION:-1.0.2}"
+KUBERNETES_DASHBOARD_VERSION="${KUBERNETES_DASHBOARD_VERSION:-2.0.4}"
+KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.0.0}"
+
+# 集群配置
+KUBE_APISERVER="${KUBE_APISERVER:-apiserver.cluster.local}"
+KUBE_POD_SUBNET="${KUBE_POD_SUBNET:-10.244.0.0/16}"
+KUBE_SERVICE_SUBNET="${KUBE_SERVICE_SUBNET:-10.96.0.0/16}"
+KUBE_IMAGE_REPO="${KUBE_IMAGE_REPO:-registry.aliyuncs.com/k8sxio}"
+KUBE_NETWORK="${KUBE_NETWORK:-flannel}"
+KUBE_INGRESS="${KUBE_INGRESS:-nginx}"
+KUBE_MONITOR="${KUBE_MONITOR:-prometheus}"
+KUBE_STORAGE="${KUBE_STORAGE:-rook}"
+KUBE_LOG="${KUBE_LOG:-elasticsearch}"
+KUBE_UI="${KUBE_UI:-dashboard}"
+
+# 定义的master和worker节点地址，以逗号分隔
+MASTER_NODES="${MASTER_NODES:-}"
+WORKER_NODES="${WORKER_NODES:-}"
+
+# 定义在哪个节点上进行设置
+MGMT_NODE="${MGMT_NODE:-127.0.0.1}"
+
+# 节点的连接信息
+SSH_USER="${SSH_USER:-root}"
+SSH_PASSWORD="${SSH_PASSWORD:-123456}"
+SSH_PORT="${SSH_PORT:-22}"
+SUDO_USER="${SUDO_USER:-root}"
+
+# 节点设置
+HOSTNAME_PREFIX="${HOSTNAME_PREFIX:-k8s}"
 ```
 
 ### 离线部署
