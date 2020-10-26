@@ -1460,19 +1460,17 @@ EOF
 function kubeadm::join() {
   # 加入集群
 
-  log::info "[kubeadm join]" "master: get CACRT_HASH"
+  log::info "[kubeadm join]" "master: get join token and cert info"
   command::exec "${MGMT_NODE}" "
     openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //'
   "
   get::command_output "CACRT_HASH" "$?" "exit"
   
-  log::info "[kubeadm join]" "master: get INTI_CERTKEY"
   command::exec "${MGMT_NODE}" "
     kubeadm init phase upload-certs --upload-certs 2>> /dev/null | tail -1
   "
   get::command_output "INTI_CERTKEY" "$?" "exit"
   
-  log::info "[kubeadm join]" "master: get INIT_TOKEN"
   command::exec "${MGMT_NODE}" "
     kubeadm token create
   "
@@ -1529,10 +1527,11 @@ function kube::wait() {
   sleep 3
   log::info "[waiting]" "waiting $app"
   command::exec "${MGMT_NODE}" "
-    kubectl wait --namespace "$namespace" \
+    $(declare -f utils::retry)
+    utils::retry 6 kubectl wait --namespace "$namespace" \
     --for=condition=ready ${resource} \
     --selector=$selector \
-    --timeout=300s
+    --timeout=60s
   "
   local status="$?"
   check::exit_code "$status" "waiting" "$app ${resource} ready"
@@ -2570,9 +2569,23 @@ fi
     kube::apply "${OFFLINE_DIR}/manifests/cluster-configuration.yaml"
 
     sleep 60
+    kube::wait "ks-installer" "kubesphere-system" "pods" "app=ks-install"
+    command::exec "${MGMT_NODE}" "
+      $(declare -f utils::retry) 
+      utils::retry 10 kubectl -n kubesphere-system get pods redis-ha-server-0
+      kubectl -n kubesphere-system get sts redis-ha-server -o yaml | sed 's#node-role.kubernetes.io/master#node-role.kubernetes.io/worker#g'  | kubectl apply -f -
+      kubectl -n kubesphere-system delete pods redis-ha-server-0
+
+      utils::retry 10 kubectl -n kubesphere-system get pods openldap-0
+      kubectl -n kubesphere-system get sts openldap -o yaml | sed 's#node-role.kubernetes.io/master#node-role.kubernetes.io/worker#g'  | kubectl apply -f -
+      kubectl -n kubesphere-system delete pods openldap-0
+    "
+    check::exit_code "$?" "ui" "set statefulset to worker node"
+
+    sleep 60
     kube::wait "kubesphere-system" "kubesphere-system" "pods --all"
-    kube::wait "kubesphere-monitoring-system" "kubesphere-monitoring-system" "pods --all" 
     kube::wait "kubesphere-controls-system" "kubesphere-controls-system" "pods --all" 
+    kube::wait "kubesphere-monitoring-system" "kubesphere-monitoring-system" "pods --all" 
 
     if [[ "$?" == "0" ]]; then
       command::exec "${MGMT_NODE}" "
