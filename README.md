@@ -178,6 +178,7 @@ Example:
 ### 初始化集群
 
 ```bash
+# 使用脚本参数
 bash kainstall.sh init \
   --master 192.168.77.130,192.168.77.131,192.168.77.132 \
   --worker 192.168.77.133,192.168.77.134 \
@@ -185,6 +186,15 @@ bash kainstall.sh init \
   --password 123456 \
   --port 22 \
   --version 1.19.3
+
+# 使用环境变量
+export MASTER_NODES="192.168.77.130,192.168.77.131,192.168.77.132"
+export WORKER_NODES="192.168.77.133,192.168.77.134"
+export SSH_USER="root"
+export SSH_PASSWORD="123456"
+export SSH_PORT="22"
+export KUBE_VERSION="1.19.3"
+bash kainstall.sh init
 ```
 > 默认情况下，除了初始化集群外，还会安装 `ingress: nginx` , `ui: dashboard` 两个组件。
 
