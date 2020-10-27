@@ -53,7 +53,8 @@ MGMT_NODE="${MGMT_NODE:-127.0.0.1}"
 
 # 节点的连接信息
 SSH_USER="${SSH_USER:-root}"
-SSH_PASSWORD="${SSH_PASSWORD:-123456}"
+SSH_PASSWORD="${SSH_PASSWORD:-}"
+SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-}"
 SSH_PORT="${SSH_PORT:-22}"
 SUDO_USER="${SUDO_USER:-root}"
 
@@ -71,6 +72,7 @@ SCRIPT_PARAMETER="$*"
 OFFLINE_DIR="/tmp/kainstall-offline-file/"
 OFFLINE_FILE=""
 OS_SUPPORT="centos7 centos8"
+GITHUB_PROXY="${GITHUB_PROXY:-https://gh.lework.workers.dev/}"
 
 trap trap::info 1 2 3 15 EXIT
 
@@ -225,8 +227,15 @@ function command::exec() {
     local status=$?
   else
     # 远程执行
-    log::exec "[command]" "sshpass -p \"zzzzzz\" ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c $(printf "%s" "${command//${SUDO_PASSWORD:-}/zzzzzz}")"
-    COMMAND_OUTPUT=$(sshpass -p "${SSH_PASSWORD}" ssh ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c "${command}" 2>> $LOG_FILE | tee -a $LOG_FILE)
+    local ssh_cmd="ssh"
+    if [[ "${SSH_PASSWORD}" != "" ]]; then
+      ssh_cmd="sshpass -p \"${SSH_PASSWORD}\" ${ssh_cmd}"
+    elif [[ "$SSH_PRIVATE_KEY" != "" ]]; then
+      [ -f "${SSH_PRIVATE_KEY}" ] || { log::err "[exec]" "ssh private_key:${SSH_PRIVATE_KEY} not found."; exit 1; }
+      ssh_cmd="${ssh_cmd} -i $SSH_PRIVATE_KEY"
+    fi
+    log::exec "[command]" "${ssh_cmd//${SUDO_PASSWORD:-}/zzzzzz} ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c $(printf "%s" "${command//${SUDO_PASSWORD:-}/zzzzzz}")"
+    COMMAND_OUTPUT=$(eval ${ssh_cmd} ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c '"${command}"' 2>> $LOG_FILE | tee -a $LOG_FILE)
     local status=$?
   fi
   return $status
@@ -242,12 +251,19 @@ function command::scp() {
    
    if [[ "x${host}" == "x127.0.0.1" ]]; then
     local command="cp -rf ${src} ${dest}"
-    echo "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: INFO: [exec] \"${command}\"" >> $LOG_FILE
+    log::exec "[command]" "bash -c \"${command}\""
     COMMAND_OUTPUT=$(bash -c "${command}" 2>> $LOG_FILE | tee -a $LOG_FILE)
     local status=$?
    else
-    echo "[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: INFO: [exec] sshpass -p ${SSH_PASSWORD} scp ${SSH_OPTIONS} -P ${SSH_PORT} -r ${src} ${SSH_USER}@${host}:${dest}" >> $LOG_FILE
-    COMMAND_OUTPUT=$(sshpass -p ${SSH_PASSWORD} scp ${SSH_OPTIONS} -P ${SSH_PORT} -r ${src} ${SSH_USER}@${host}:${dest} 2>> $LOG_FILE | tee -a $LOG_FILE)
+    local scp_cmd="scp"
+    if [[ "${SSH_PASSWORD}" != "" ]]; then
+      scp_cmd="sshpass -p \"${SSH_PASSWORD}\" ${scp_cmd}"
+    elif [[ "$SSH_PRIVATE_KEY" != "" ]]; then
+      [ -f "${SSH_PRIVATE_KEY}" ] || { log::err "[exec]" "ssh private_key:${SSH_PRIVATE_KEY} not found."; exit 1; }
+      scp_cmd="${scp_cmd} -i $SSH_PRIVATE_KEY"
+    fi
+    log::exec "[command]" "${scp_cmd} ${SSH_OPTIONS} -P ${SSH_PORT} -r ${src} ${SSH_USER}@${host}:${dest}" >> $LOG_FILE
+    COMMAND_OUTPUT=$(eval ${scp_cmd} ${SSH_OPTIONS} -P ${SSH_PORT} -r ${src} ${SSH_USER}@${host}:${dest} 2>> $LOG_FILE | tee -a $LOG_FILE)
     local status=$?
   fi
   return $status
@@ -595,6 +611,115 @@ MaxRetentionSec=3week
 # 不将日志转发到 syslog
 ForwardToSyslog=no
 EOF
+
+  # motd
+  cat << EOF > /etc/profile.d/zz-ssh-login-info.sh
+#!/bin/sh
+#
+# @Time    : 2020-02-04
+# @Author  : lework
+# @Desc    : ssh login banner
+
+# os
+upSeconds="\$(cut -d. -f1 /proc/uptime)"
+secs=\$((\${upSeconds}%60))
+mins=\$((\${upSeconds}/60%60))
+hours=\$((\${upSeconds}/3600%24))
+days=\$((\${upSeconds}/86400))
+UPTIME_INFO=\$(printf "%d days, %02dh %02dm %02ds" "\$days" "\$hours" "\$mins" "\$secs")
+
+if [ -f /etc/redhat-release ] ; then
+    PRETTY_NAME=\$(< /etc/redhat-release)
+
+elif [ -f /etc/debian_version ]; then
+   DIST_VER=\$(</etc/debian_version)
+   PRETTY_NAME="\$(grep PRETTY_NAME /etc/os-release | sed -e 's/PRETTY_NAME=//g' -e  's/"//g') (\$DIST_VER)"
+
+else
+    PRETTY_NAME=\$(cat /etc/*-release | grep "PRETTY_NAME" | sed -e 's/PRETTY_NAME=//g' -e 's/"//g')
+fi
+
+if [[ -d "/system/app/" && -d "/system/priv-app" ]]; then
+    model="\$(getprop ro.product.brand) \$(getprop ro.product.model)"
+
+elif [[ -f /sys/devices/virtual/dmi/id/product_name ||
+        -f /sys/devices/virtual/dmi/id/product_version ]]; then
+    model="\$(< /sys/devices/virtual/dmi/id/product_name)"
+    model+=" \$(< /sys/devices/virtual/dmi/id/product_version)"
+
+elif [[ -f /sys/firmware/devicetree/base/model ]]; then
+    model="\$(< /sys/firmware/devicetree/base/model)"
+
+elif [[ -f /tmp/sysinfo/model ]]; then
+    model="\$(< /tmp/sysinfo/model)"
+fi
+
+MODEL_INFO=\${model}
+KERNEL=\$(uname -srmo)
+USER_NUM=\$(who -u | wc -l)
+RUNNING=\$(ps ax | wc -l | tr -d " ")
+
+# disk
+totaldisk=\$(df -h -x devtmpfs -x tmpfs -x debugfs -x aufs -x overlay --total 2>/dev/null | tail -1)
+disktotal=\$(awk '{print \$2}' <<< "\${totaldisk}")
+diskused=\$(awk '{print \$3}' <<< "\${totaldisk}")
+diskusedper=\$(awk '{print \$5}' <<< "\${totaldisk}")
+DISK_INFO="\033[0;33m\${diskused}\033[0m of \033[0;34m\${disktotal}\033[0m disk space used (\033[0;33m\${diskusedper}\033[0m)"
+
+# cpu
+cpu=\$(awk -F':' '/^model name/ {print \$2}' /proc/cpuinfo | uniq | sed -e 's/^[ \t]*//')
+cpun=\$(grep -c '^processor' /proc/cpuinfo)
+cpuc=\$(grep '^cpu cores' /proc/cpuinfo | tail -1 | awk '{print \$4}')
+cpup=\$(grep '^physical id' /proc/cpuinfo | wc -l)
+CPU_INFO="\${cpu} \${cpup}P \${cpuc}C \${cpun}L"
+
+# get the load averages
+read one five fifteen rest < /proc/loadavg
+LOADAVG_INFO="\033[0;33m\${one}\033[0m / \${five} / \${fifteen} with \033[0;34m\$(( cpun*cpuc ))\033[0m core(s) at \033[0;34m\$(grep '^cpu MHz' /proc/cpuinfo | tail -1 | awk '{print \$4}')\033 MHz"
+
+# mem
+MEM_INFO="\$(cat /proc/meminfo | awk '/MemTotal:/{total=\$2/1024/1024;next} /MemAvailable:/{use=total-\$2/1024/1024; printf("\033[0;33m%.2fGiB\033[0m of \033[0;34m%.2fGiB\033[0m RAM used (\033[0;33m%.2f%\033[0m)",use,total,(use/total)*100);}')"
+
+# network
+# extranet_ip=" and \$(curl -s ip.cip.cc)"
+IP_INFO="\$(ip a | grep glo | awk '{print \$2}' | head -1 | cut -f1 -d/)\${extranet_ip:-}"
+
+# docker info
+DOCKER_INFO="\$(sudo /usr/bin/docker info | awk '/Running:/{run=\$1\$2; next} /Paused:/{pause=\$1\$2;next} /Stopped:/{stop=\$1\$2;next} /Images:/{image=\$1\$2;printf("\033[0;33m%s\033[0m  %s  \033[0;33m%s\033[0m  %s" ,run, pause, stop, image)}')"
+
+# info
+echo -e "\033[0;32m
+ ██╗  ██╗ █████╗ ███████╗
+ ██║ ██╔╝██╔══██╗██╔════╝
+ █████╔╝ ╚█████╔╝███████╗
+ ██╔═██╗ ██╔══██╗╚════██║
+ ██║  ██╗╚█████╔╝███████║
+ ╚═╝  ╚═╝ ╚════╝ ╚══════ by kainstall
+ \033[0m
+
+ Information as of: \033[1;34m\$(date +"%Y-%m-%d %T")\033[0m
+ 
+ \033[0;1;31mProduct\033[0m............: \${MODEL_INFO}
+ \033[0;1;31mOS\033[0m.................: \${PRETTY_NAME}
+ \033[0;1;31mKernel\033[0m.............: \${KERNEL}
+ \033[0;1;31mCPU\033[0m................: \${CPU_INFO}
+
+ \033[0;1;31mHostname\033[0m...........: \033[0;34m\$(hostname)\033[0m
+ \033[0;1;31mIP Addresses\033[0m.......: \033[1;34m\${IP_INFO}\033[0m
+
+ \033[0;1;31mUptime\033[0m.............: \033[0;33m\${UPTIME_INFO}\033[0m
+ \033[0;1;31mMemory\033[0m.............: \${MEM_INFO}
+ \033[0;1;31mLoad Averages\033[0m......: \${LOADAVG_INFO}
+ \033[0;1;31mDisk Usage\033[0m.........: \${DISK_INFO} 
+
+ \033[0;1;31mUsers online\033[0m.......: \033[0;34m\${USER_NUM}\033[0m
+ \033[0;1;31mRunning Processes\033[0m..: \033[0;34m\${RUNNING}\033[0m
+ \033[0;1;31mDocker Info\033[0m........: \${DOCKER_INFO}
+"
+EOF
+
+  chmod +x /etc/profile.d/zz-ssh-login-info.sh
+  echo 'ALL ALL=NOPASSWD: /usr/bin/docker info' > /etc/sudoers.d/docker
 
   # time sync
   yum install -y chrony 
@@ -998,7 +1123,7 @@ function install::package() {
     
     log::info "[install]" "download kubeadm 10 years certs client"
     local certs_file="${OFFLINE_DIR}/bins/kubeadm-linux-amd64"
-    MGMT_NODE="127.0.0.1" utils::download_file "https://gh.lework.workers.dev/https://github.com/lework/kubeadm-certs/releases/download/v${version}/kubeadm-linux-amd64" "${certs_file}"
+    MGMT_NODE="127.0.0.1" utils::download_file "${GITHUB_PROXY}https://github.com/lework/kubeadm-certs/releases/download/v${version}/kubeadm-linux-amd64" "${certs_file}"
     
     for host in $MASTER_NODES $WORKER_NODES
     do
@@ -2018,7 +2143,7 @@ function add::monitor() {
   
   if [[ "$KUBE_MONITOR" == "prometheus" ]]; then
     log::info "[monitor]" "add prometheus"
-    utils::download_file "https://gh.lework.workers.dev/https://github.com/prometheus-operator/kube-prometheus/archive/v${KUBE_PROMETHEUS_VERSION}.zip" "${OFFLINE_DIR}/manifests/prometheus.zip" "unzip"
+    utils::download_file "${GITHUB_PROXY}https://github.com/prometheus-operator/kube-prometheus/archive/v${KUBE_PROMETHEUS_VERSION}.zip" "${OFFLINE_DIR}/manifests/prometheus.zip" "unzip"
    
     log::info "[monitor]" "apply prometheus manifests"
     command::exec "${MGMT_NODE}" "
@@ -2420,7 +2545,7 @@ function add::storage() {
   if [[ "$KUBE_STORAGE" == "rook" ]]; then
 
     log::info "[storage]" "add rook"
-    utils::download_file "https://gh.lework.workers.dev/https://github.com/rook/rook/archive/v${ROOK_VERSION}.zip" "${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}.zip" "unzip"
+    utils::download_file "${GITHUB_PROXY}https://github.com/rook/rook/archive/v${ROOK_VERSION}.zip" "${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}.zip" "unzip"
 
     kube::apply "${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/common.yaml"
     kube::apply "${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/operator.yaml"
@@ -2648,13 +2773,13 @@ spec:
             - -c
             - etcdctl --endpoints=https://127.0.0.1:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt
               --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt --key=/etc/kubernetes/pki/etcd/healthcheck-client.key
-              snapshot save /backup/etcd-snapshot-\\\$(date +%Y-%m-%d_%H:%M:%S_%Z).db
-              && echo 'delete old backups' && find /backup -type f -mtime +30 -exec rm -fv {} \\\; || echo error
+              snapshot save /backup/etcd-snapshot-\\\\\\\$(date +%Y-%m-%d_%H:%M:%S_%Z).db
+              && echo 'delete old backups' && find /backup -type f -mtime +30 -exec rm -fv {} \\; || echo error
             command:
             - /bin/sh
             env:
             - name: ETCDCTL_API
-              value: \\\"3\\\"
+              value: '3'
             resources: {}
             terminationMessagePath: /dev/termination-log
             terminationMessagePolicy: File
@@ -2700,7 +2825,7 @@ spec:
             hostPath:
               path: /lib64
 """
-  log::access "[ops]" "etcd backup directory: /var/lib/etcd/backups"
+  [[ "$?" == "" ]] && log::access "[ops]" "etcd backup directory: /var/lib/etcd/backups" || true
 }
 
 
@@ -3035,7 +3160,8 @@ Flag:
   -m,--master          master node, default: ''
   -w,--worker          work node, default: ''
   -u,--user            ssh user, default: ${SSH_USER}
-  -p,--password        ssh password,default: ${SSH_PASSWORD}
+  -p,--password        ssh password
+     --private-key     ssh private key
   -P,--port            ssh port, default: ${SSH_PORT}
   -v,--version         kube version, default: ${KUBE_VERSION}
   -n,--network         cluster network, choose: [flannel,calico], default: ${KUBE_NETWORK}
@@ -3046,10 +3172,10 @@ Flag:
   -s,--storage         cluster storage, choose: [rook,longhorn]
   -U,--upgrade-kernel  upgrade kernel
   -of,--offline-file   specify the offline package file to load
-  --10years            the certificate period is 10 years.
-  --sudo               sudo mode
-  --sudo-user          sudo user
-  --sudo-password      sudo user password
+      --10years        the certificate period is 10 years.
+      --sudo           sudo mode
+      --sudo-user      sudo user
+      --sudo-password  sudo user password
 
 Example:
   [init cluster]
@@ -3126,6 +3252,9 @@ while [ "${1:-}" != "" ]; do
                             ;;
     -p | --password )       shift
                             SSH_PASSWORD=${1:-$SSH_PASSWORD}
+                            ;;
+    --private-key )         shift
+                            SSH_PRIVATE_KEY=${1:-$SSH_SSH_PRIVATE_KEY}
                             ;;
     -P | --port )           shift
                             SSH_PORT=${1:-$SSH_PORT}

@@ -20,6 +20,8 @@ CPU: `2C`
 
 MEM: `4G`
 
+认证: 集群节点需**统一认证**; 使用密码认证时，集群节点需使用同一用户名和密码，使用密钥认证时，集群节点需使用同一个密钥文件登陆。
+
 > 未指定离线包时，需要连通外网，用于下载 kube 组件和 docker 镜像。
 
 
@@ -120,7 +122,8 @@ Flag:
   -m,--master          master node, default: ''
   -w,--worker          work node, default: ''
   -u,--user            ssh user, default: root
-  -p,--password        ssh password,default: 123456
+  -p,--password        ssh password
+     --private-key     ssh private key
   -P,--port            ssh port, default: 22
   -v,--version         kube version, default: latest
   -n,--network         cluster network, choose: [flannel,calico], default: flannel
@@ -131,10 +134,10 @@ Flag:
   -s,--storage         cluster storage, choose: [rook,longhorn]
   -U,--upgrade-kernel  upgrade kernel
   -of,--offline-file   specify the offline package file to load
-  --10years            the certificate period is 10 years.
-  --sudo               sudo mode
-  --sudo-user          sudo user
-  --sudo-password      sudo user password
+      --10years        the certificate period is 10 years.
+      --sudo           sudo mode
+      --sudo-user      sudo user
+      --sudo-password  sudo user password
 
 Example:
   [init cluster]
@@ -316,12 +319,16 @@ MGMT_NODE="${MGMT_NODE:-127.0.0.1}"
 
 # 节点的连接信息
 SSH_USER="${SSH_USER:-root}"
-SSH_PASSWORD="${SSH_PASSWORD:-123456}"
+SSH_PASSWORD="${SSH_PASSWORD:-}"
+SSH_PRIVATE_KEY="${SSH_PRIVATE_KEY:-}"
 SSH_PORT="${SSH_PORT:-22}"
 SUDO_USER="${SUDO_USER:-root}"
 
 # 节点设置
 HOSTNAME_PREFIX="${HOSTNAME_PREFIX:-k8s}"
+
+# 脚本设置
+GITHUB_PROXY="${GITHUB_PROXY:-https://gh.lework.workers.dev/}"
 ```
 
 ### 离线部署
