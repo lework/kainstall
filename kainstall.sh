@@ -758,6 +758,35 @@ EOF
   done
   systemctl enable --now systemd-modules-load.service
 
+  # audit
+  yum install -y audit audit-libs
+cat << EOF >> /etc/audit/rules.d/audit.rules
+## Kainstall managed start
+# docker
+-w /usr/bin/dockerd -k docker
+-w /var/lib/docker -k docker
+-w /etc/docker -k docker
+-w /usr/lib/systemd/system/docker.service -k docker
+-w /etc/systemd/system/docker.service -k docker
+-w /usr/lib/systemd/system/docker.socket -k docker
+-w /etc/default/docker -k docker
+-w /etc/sysconfig/docker -k docker
+-w /etc/docker/daemon.json -k docker
+-w /usr/bin/containerd -k docker
+-w /usr/sbin/runc -k docker
+
+# kube
+-w /usr/bin/kubeadm -k kubeadm
+-w /usr/bin/kubelet -k kubelet
+-w /usr/bin/kubectl -k kubectl
+## Kainstall managed end
+EOF
+  chmod 600 /etc/audit/rules.d/audit.rules
+  sed -i 's#max_log_file = 8#max_log_file = 80#g' /etc/audit/auditd.conf 
+  [ -f /usr/libexec/initscripts/legacy-actions/auditd/restart ] && \
+     /usr/libexec/initscripts/legacy-actions/auditd/restart || \
+     { systemctl stop auditd && systemctl start auditd; }
+   systemctl enable auditd
 }
 
 
@@ -869,6 +898,7 @@ EOF
     }
   },
   "live-restore": true,
+  "oom-score-adjust": -1000,
   "max-concurrent-downloads": 10,
   "max-concurrent-uploads": 10,
   "storage-driver": "overlay2",
@@ -880,6 +910,9 @@ EOF
   ]
 }
 EOF
+  sed -i 's|#oom_score = 0|oom_score = -999|' /etc/containerd/config.toml
+  systemctl restart containerd
+
   systemctl enable docker
   systemctl restart docker
 }
@@ -1282,12 +1315,67 @@ function cert::renew() {
 }
 
 
+function init::node_config() {
+  # 初始化节点配置
+
+  local master_index=${master_index:-1}
+  local worker_index=${worker_index:-1}
+  
+  # master
+  for host in $MASTER_NODES
+  do
+    log::info "[init]" "master: $host"
+    command::exec "${host}" "
+	  $([[ "${OFFLINE_TAG:-}" == "1" ]] && declare -f script::init_node | sed 's/yum install/#yum install/g' || declare -f script::init_node); script::init_node
+	"
+    check::exit_code "$?" "init" "init master $host"
+
+    # 设置主机名和解析
+    command::exec "${host}" "
+      printf "\"${MGMT_NODE} $KUBE_APISERVER\\n$node_hosts\"" >> /etc/hosts
+      hostnamectl set-hostname ${HOSTNAME_PREFIX}-master-node${master_index}
+    "
+    check::exit_code "$?" "init" "$host set hostname and hostname resolution"
+
+    # set audit-policy
+    log::info "[init]" "$host: set audit-policy file."
+    command::exec "${host}" "
+      cat << EOF > /etc/kubernetes/audit-policy.yaml
+# Log all requests at the Metadata level.
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+- level: Metadata
+EOF
+    "
+    check::exit_code "$?" "init" "$host: set audit-policy file" "exit"
+    master_index=$((master_index + 1))
+  done
+   
+  # worker
+  for host in $WORKER_NODES
+  do
+    log::info "[init]" "worker: $host"
+    command::exec "${host}" "
+	  $([[ "${OFFLINE_TAG:-}" == "1" ]] && declare -f script::init_node | sed 's/yum install/#yum install/g' || declare -f script::init_node); script::init_node
+	"
+    check::exit_code "$?" "init" "init worker $host"
+
+    # 设置主机名和解析
+    command::exec "${host}" "
+      printf "\"127.0.0.1 $KUBE_APISERVER\\n$node_hosts\"" >> /etc/hosts
+      hostnamectl set-hostname ${HOSTNAME_PREFIX}-worker-node${worker_index}
+    "
+    worker_index=$((worker_index + 1))
+  done
+}
+
+
 function init::node() {
   # 初始化节点
   
   init::upgrade_kernel
 
-  # 设置主机名解析
   local node_hosts=""
   local i=1
   for h in $MASTER_NODES
@@ -1303,44 +1391,7 @@ function init::node() {
     i=$((i + 1))
   done
 
-  local index=1
-  # master节点
-  for host in $MASTER_NODES
-  do
-    log::info "[init]" "master: $host"
-    command::exec "${host}" "
-	  $([[ "${OFFLINE_TAG:-}" == "1" ]] && declare -f script::init_node | sed 's/yum install/#yum install/g' || declare -f script::init_node); script::init_node
-	"
-    check::exit_code "$?" "init" "init master $host"
-
-    # 设置主机名和解析
-    command::exec "${host}" "
-      printf "\"${MGMT_NODE} $KUBE_APISERVER\\n$node_hosts\"" >> /etc/hosts
-      hostnamectl set-hostname ${HOSTNAME_PREFIX}-master-node${index}
-    "
-    check::exit_code "$?" "init" "$host set hostname and hostname resolution"
-
-    
-    index=$((index + 1))
-  done
-   
-  # worker 节点
-  local index=1
-  for host in $WORKER_NODES
-  do
-    log::info "[init]" "worker: $host"
-    command::exec "${host}" "
-	  $([[ "${OFFLINE_TAG:-}" == "1" ]] && declare -f script::init_node | sed 's/yum install/#yum install/g' || declare -f script::init_node); script::init_node
-	"
-    check::exit_code "$?" "init" "init worker $host"
-
-    # 设置主机名和解析
-    command::exec "${host}" "
-      printf "\"127.0.0.1 $KUBE_APISERVER\\n$node_hosts\"" >> /etc/hosts
-      hostnamectl set-hostname ${HOSTNAME_PREFIX}-worker-node${index}
-    "
-    index=$((index + 1))
-  done
+  init::node_config
 }
 
 
@@ -1351,6 +1402,7 @@ function init::add_node() {
 
   local master_index=0
   local worker_index=0
+  local node_hosts=""
   local add_node_hosts=""
 
   command::exec "${MGMT_NODE}" "
@@ -1363,6 +1415,14 @@ function init::add_node() {
     kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {.metadata.name }\\n{end}'
   "
   get::command_output "node_hosts" "$?" "exit"
+  
+  for host in $MASTER_NODES $WORKER_NODES
+  do
+    if [[ $node_hosts == *"$host"* ]]; then
+      log::err "[init]" "The host $host is already in the cluster!"
+      exit 1
+    fi
+  done
   
   # 获取节点索引
   command::exec "${MGMT_NODE}" "
@@ -1386,60 +1446,13 @@ function init::add_node() {
     i=$((i + 1))
   done
   
-
   i=$worker_index
   for host in $WORKER_NODES
   do
     add_node_hosts="${add_node_hosts}\n${host:-} ${HOSTNAME_PREFIX}-worker-node${i}"
     i=$((i + 1))
   done
-
-
-  # 初始化master节点
-  for host in $MASTER_NODES
-  do
-    if [[ $node_hosts == *"$host"* ]]; then
-      log::err "[init]" "The host $host is already in the cluster!"
-      exit 1
-    fi
-
-    log::info "[init]" "master: $host"
-    command::exec "${host}" "
-	  $([[ "${OFFLINE_TAG:-}" == "1" ]] && declare -f script::init_node | sed 's/yum install/#yum install/g' || declare -f script::init_node); script::init_node
-	"
-    check::exit_code "$?" "init" "init master $host"
-
-    # 设置主机名和解析
-    command::exec "${host}" "
-      printf "\"${MGMT_NODE} $KUBE_APISERVER\\n$node_hosts\\n$add_node_hosts\"" >> /etc/hosts
-      hostnamectl set-hostname ${HOSTNAME_PREFIX}-master-node${master_index}
-    "
-    check::exit_code "$?" "init" "$host: set hostname and add cluster node hostname resolution"
-    master_index=$((master_index + 1))
-  done
-   
-  # 初始化worker节点
-  for host in $WORKER_NODES
-  do
-    if [[ $node_hosts == *"$host"* ]]; then
-      log::err "[init]" "The host $host is already in the cluster!"
-      exit 1
-    fi
-    log::info "[init]" "worker: $host"
-    command::exec "${host}" "
-	  $([[ "${OFFLINE_TAG:-}" == "1" ]] && declare -f script::init_node | sed 's/yum install/#yum install/g' || declare -f script::init_node); script::init_node
-	"
-    check::exit_code "$?" "init" "init worker $host"
-
-    # 设置主机名和解析
-    command::exec "${host}" "
-      printf "\"127.0.0.1 $KUBE_APISERVER\\n$node_hosts\\n$add_node_hosts\"" >> /etc/hosts
-      hostnamectl set-hostname ${HOSTNAME_PREFIX}-worker-node${worker_index}
-    "
-    check::exit_code "$?" "init" "$host: set hostname and add cluster node hostname resolution"
-    worker_index=$((worker_index + 1))
-  done
-
+  
   #向集群节点添加新增的节点主机名解析 
   for host in $(printf "$node_hosts" | awk '{print $1}')
   do
@@ -1449,6 +1462,8 @@ function init::add_node() {
      check::exit_code "$?" "init" "$host add new node hostname resolution"
   done
 
+  node_hosts="${node_hosts}\n${add_node_hosts}"
+  init::node_config
 }
 
 
@@ -1520,7 +1535,22 @@ $(for h in $MASTER_NODES;do echo "  - $h";done)
   extraArgs:
     event-ttl: '720h'
     service-node-port-range: '30000-50000'
+    # 审计日志相关配置
+    audit-log-maxage: '20'
+    audit-log-maxbackup: '10'
+    audit-log-maxsize: '100'
+    audit-log-path: /var/log/kube-audit/audit.log
+    audit-policy-file: /etc/kubernetes/audit-policy.yaml
   extraVolumes:
+  - name: audit-config
+    hostPath: /etc/kubernetes/audit-policy.yaml
+    mountPath: /etc/kubernetes/audit-policy.yaml
+    readOnly: true
+    pathType: File
+  - name: audit-log
+    hostPath: /var/log/kube-audit
+    mountPath: /var/log/kube-audit
+    pathType: DirectoryOrCreate
   - name: localtime
     hostPath: /etc/localtime
     mountPath: /etc/localtime
@@ -2730,6 +2760,11 @@ function add::ops() {
    
    log::info "[ops]" "add etcd snapshot cronjob"
    local master_num=$(awk '{print NF}' <<< ${MASTER_NODES})
+   command::exec "${MGMT_NODE}" "
+     kubeadm config images list --config=/etc/kubernetes/kubeadmcfg.yaml 2>/dev/null | grep etcd:
+   "
+   get::command_output "etcd_image" "$?"
+
    [[ "${master_num:-0}" == "0" ]] && master_num=1 || true
    kube::apply "etcd-snapshot" """
 ---
@@ -2766,8 +2801,7 @@ spec:
                 topologyKey: 'kubernetes.io/hostname'
           containers:
           - name: etcd-snapshot
-            # Same image as in /etc/kubernetes/manifests/etcd.yaml
-            image: ${KUBE_IMAGE_REPO}/etcd:3.4.13-0
+            image: ${etcd_image:-${KUBE_IMAGE_REPO}/etcd:3.4.13-0}
             imagePullPolicy: IfNotPresent
             args:
             - -c
@@ -2840,7 +2874,7 @@ function reset::node() {
     yum remove -y kubeadm kubelet kubectl
     [ -f /etc/haproxy/haproxy.cfg ] && systemctl stop haproxy
     sed -i -e \"/$KUBE_APISERVER/d\" -e '/-worker-/d' -e '/-master-/d' /etc/hosts
-    sed -i '/## Kainstall managed start/,/## Kainstall managed end/d' /etc/security/limits.conf /etc/systemd/system.conf /etc/bashrc /etc/rc.local
+    sed -i '/## Kainstall managed start/,/## Kainstall managed end/d' /etc/security/limits.conf /etc/systemd/system.conf /etc/bashrc /etc/rc.local /etc/audit/rules.d/audit.rules
     iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X
     [ -d /var/lib/kubelet ] && find /var/lib/kubelet | xargs -n 1 findmnt -n -t tmpfs -o TARGET -T | uniq | xargs -r umount -v
     rm -rf /etc/kubernetes/* /var/lib/etcd/* \$HOME/.kube /etc/cni/net.d/* /var/lib/elasticsearch/* /var/lib/longhorn/*
