@@ -1424,35 +1424,33 @@ function init::add_node() {
     fi
   done
   
-  # 获取节点索引
-  command::exec "${MGMT_NODE}" "
-    kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
-  "
-  get::command_output "master_index" "$?" "exit"
-    
-  command::exec "${MGMT_NODE}" "
-    kubectl get node --selector='!node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
-  "
-  get::command_output "worker_index" "$?" "exit"
-  
-  master_index=$(( master_index + 1 ))
-  worker_index=$(( worker_index + 1 ))
+  if [[ "$MASTER_NODES" != "" ]]; then
+    command::exec "${MGMT_NODE}" "
+      kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
+    "
+    get::command_output "master_index" "$?" "exit"
+    master_index=$(( master_index + 1 ))
+    local i=$master_index
+    for host in $MASTER_NODES
+    do
+      add_node_hosts="${add_node_hosts}\n${host:-} ${HOSTNAME_PREFIX}-master-node${i}"
+      i=$((i + 1))
+    done
+  fi
 
-  # 获取添加的节点主机名解析记录
-  local i=$master_index
-  for host in $MASTER_NODES
-  do
-    add_node_hosts="${add_node_hosts}\n${host:-} ${HOSTNAME_PREFIX}-master-node${i}"
-    i=$((i + 1))
-  done
-  
-  i=$worker_index
-  for host in $WORKER_NODES
-  do
-    add_node_hosts="${add_node_hosts}\n${host:-} ${HOSTNAME_PREFIX}-worker-node${i}"
-    i=$((i + 1))
-  done
-  
+  if [[ "$WORKER_NODES" != "" ]]; then
+    command::exec "${MGMT_NODE}" "
+      kubectl get node --selector='!node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$' || echo 0
+    "
+    get::command_output "worker_index" "$?" "exit"
+    worker_index=$(( worker_index + 1 ))
+    local i=$worker_index
+    for host in $WORKER_NODES
+    do
+      add_node_hosts="${add_node_hosts}\n${host:-} ${HOSTNAME_PREFIX}-worker-node${i}"
+      i=$((i + 1))
+    done
+  fi
   #向集群节点添加新增的节点主机名解析 
   for host in $(printf "$node_hosts" | awk '{print $1}')
   do
@@ -1738,33 +1736,40 @@ function config::haproxy_backend() {
   local action=${1:-add}
   local action_cmd=""
   
-  if [[ "$MASTER_NODES" != "" && "$MASTER_NODES" != "127.0.0.1" ]]; then
-    command::exec "${MGMT_NODE}" "
-      kubectl get node --selector='!node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].status.addresses[?(@.type==\"InternalIP\")].address}'
-    "
-    get::command_output "work_nodes" "$?" "exit"
-    
-    for host in ${work_nodes:-}
-    do
-      log::info "[config]" "${host}: ${action} apiserver from haproxy"
-      for m in $MASTER_NODES
-      do
-        if [[ "${action}" == "add" ]]; then
-           local num=$(echo "${m}"| awk -F'.' '{print $4}')
-           action_cmd="echo \"    server apiserver${num} ${m}:6443 check\" >> /etc/haproxy/haproxy.cfg"
-        else
-           action_cmd="sed -i -e \"/${m}/d\" /etc/haproxy/haproxy.cfg"
-        fi
-
-        command::exec "${host}" "
-          ${action_cmd}
-          haproxy -c -f /etc/haproxy/haproxy.cfg
-          systemctl reload haproxy
-        "
-        check::exit_code "$?" "config" "${host}: ${action} apiserver(${m}) from haproxy"
-      done
-    done
+  if [[ "$MASTER_NODES" == "" || "$MASTER_NODES" == "127.0.0.1" ]]; then
+    return
   fi
+
+  command::exec "${MGMT_NODE}" "
+    kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].status.addresses[?(@.type==\"InternalIP\")].address}'
+  "
+  get::command_output "master_nodes" "$?" "exit"
+  
+  for m in $MASTER_NODES
+  do
+    if [[ "${action}" == "add" ]]; then
+      local num=$(echo "${m}"| awk -F'.' '{print $4}')
+      action_cmd="${action_cmd}\necho \"    server apiserver${num} ${m}:6443 check\" >> /etc/haproxy/haproxy.cfg"
+    else
+      [[ "${master_nodes}" == *"${m}"* ]] || return
+      action_cmd="${action_cmd}\n sed -i -e \"/${m}/d\" /etc/haproxy/haproxy.cfg"
+    fi
+  done
+        
+  command::exec "${MGMT_NODE}" "
+    kubectl get node --selector='!node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].status.addresses[?(@.type==\"InternalIP\")].address}'
+  "
+  get::command_output "worker_nodes" "$?" "exit"
+  
+  for host in ${worker_nodes:-}
+  do
+    log::info "[config]" "worker ${host}: ${action} apiserver from haproxy"
+    command::exec "${host}" "
+      $(printf "${action_cmd}")
+      haproxy -c -f /etc/haproxy/haproxy.cfg && systemctl reload haproxy
+    "
+    check::exit_code "$?" "config" "worker ${host}: ${action} apiserver(${m}) from haproxy"
+  done
 }
 
 
@@ -2592,7 +2597,7 @@ function add::storage() {
     for host in ${cluster_nodes:-}
     do
       log::info "[storage]"  "${host}: install iscsi-initiator-utils"
-      command::exec "${MGMT_NODE}" "
+      command::exec "${host}" "
         yum install -y iscsi-initiator-utils
       "
       check::exit_code "$?" "storage" "${host}: install iscsi-initiator-utils" "exit"
@@ -2898,7 +2903,7 @@ function reset::cluster() {
   command::exec "${MGMT_NODE}" "
     kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {end}'
   "
-  get::command_output "all_node" "$?" "exit"
+  get::command_output "all_node" "$?"
   
   all_node=$(echo "${MASTER_NODES} ${WORKER_NODES} ${all_node}" | awk '{for (i=1;i<=NF;i++) if (!a[$i]++) printf("%s%s",$i,FS)}')
 
@@ -3060,6 +3065,7 @@ function del::node() {
   config::haproxy_backend "remove"
 
   local cluster_nodes=""
+  local del_hosts_cmd=""
   command::exec "${MGMT_NODE}" "
      kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {.metadata.name }\\n{end}'
   "
@@ -3072,6 +3078,8 @@ function del::node() {
     local node_name=$(printf "${cluster_nodes}" | grep ${host} | awk '{print $2}' )
     if [[ "${node_name}" == "" ]]; then
       log::warning "[del]" "node $host not found."
+      read -t 10 -n 1 -p "Do you need to reset the node (y/n)? " answer
+      [[ -z "$answer" || "$answer" != "y" ]] && exit || echo
     else
       log::info "[del]" "drain $host"
       command::exec "${MGMT_NODE}" "kubectl drain $node_name --force --ignore-daemonsets --delete-local-data"
@@ -3083,16 +3091,14 @@ function del::node() {
       sleep 3
     fi
     reset::node "$host"
+    del_hosts_cmd="${del_hosts_cmd}\nsed -i "/$host/d" /etc/hosts"
   done
 
   for host in $(printf "${cluster_nodes}" | awk '{print $1}')
   do
      log::info "[del]" "$host: remove del node hostname resolution"
      command::exec "${host}" "
-       for h in $MASTER_NODES $WORKER_NODES
-       do
-         sed -i \"/\$h/d\" /etc/hosts
-       done
+       $(printf "${del_hosts_cmd}")
      "
      check::exit_code "$?" "del" "remove del node hostname resolution"
   done
