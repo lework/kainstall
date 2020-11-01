@@ -685,7 +685,7 @@ MEM_INFO="\$(cat /proc/meminfo | awk '/MemTotal:/{total=\$2/1024/1024;next} /Mem
 IP_INFO="\$(ip a | grep glo | awk '{print \$2}' | head -1 | cut -f1 -d/)\${extranet_ip:-}"
 
 # docker info
-DOCKER_INFO="\$(sudo /usr/bin/docker info | awk '/Running:/{run=\$1\$2; next} /Paused:/{pause=\$1\$2;next} /Stopped:/{stop=\$1\$2;next} /Images:/{image=\$1\$2;printf("\033[0;33m%s\033[0m  %s  \033[0;33m%s\033[0m  %s" ,run, pause, stop, image)}')"
+DOCKER_INFO="\$(sudo /usr/bin/docker info 2> /dev/null | awk '/Running:/{run=\$1\$2; next} /Paused:/{pause=\$1\$2;next} /Stopped:/{stop=\$1\$2;next} /Images:/{image=\$1\$2;printf("\033[0;33m%s\033[0m  %s  \033[0;33m%s\033[0m  %s" ,run, pause, stop, image)}')"
 
 # info
 echo -e "\033[0;32m
@@ -1340,6 +1340,7 @@ function init::node_config() {
     # set audit-policy
     log::info "[init]" "$host: set audit-policy file."
     command::exec "${host}" "
+	  [ ! -d etc/kubernetes ] && mkdir -p /etc/kubernetes
       cat << EOF > /etc/kubernetes/audit-policy.yaml
 # Log all requests at the Metadata level.
 apiVersion: audit.k8s.io/v1
