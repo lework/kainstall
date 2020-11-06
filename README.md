@@ -278,6 +278,9 @@ bash kainstall.sh upgrade --version 1.19.3
 
 # 重新颁发证书
 bash kainstall.sh renew-cert
+
+# debug模式
+DEBUG=1 bash kainstall.sh
 ```
 
 ### 默认设置

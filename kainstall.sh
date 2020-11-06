@@ -8,6 +8,7 @@
 ###################################################################
 
 
+[[ -n $DEBUG ]] && set -x || true
 set -o errtrace         # Make sure any error trap is inherited
 set -o nounset          # Disallow expansion of unset variables
 set -o pipefail         # Use last non-zero exit code in a pipeline
@@ -72,7 +73,7 @@ SCRIPT_PARAMETER="$*"
 OFFLINE_DIR="/tmp/kainstall-offline-file/"
 OFFLINE_FILE=""
 OS_SUPPORT="centos7 centos8"
-GITHUB_PROXY="${GITHUB_PROXY:-https://gh.lework.workers.dev/}"
+GITHUB_PROXY="${GITHUB_PROXY:-https://gh.con.sh/}"
 
 trap trap::info 1 2 3 15 EXIT
 
@@ -331,6 +332,7 @@ EOF
 
    # Change sysctl
    cat << EOF >  /etc/sysctl.d/99-kube.conf
+# https://www.kernel.org/doc/Documentation/sysctl/
 #############################################################################################
 # 调整虚拟内存
 #############################################################################################
@@ -620,6 +622,7 @@ EOF
 # @Author  : lework
 # @Desc    : ssh login banner
 
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 # os
 upSeconds="\$(cut -d. -f1 /proc/uptime)"
 secs=\$((\${upSeconds}%60))
@@ -906,7 +909,7 @@ EOF
   "exec-opts": ["native.cgroupdriver=systemd"],
   "registry-mirrors": [
     "https://yssx4sxy.mirror.aliyuncs.com/",
-    "https://docker.mirrors.ustc.edu.cn/"
+    "https://hub-mirror.c.163.com/"
   ]
 }
 EOF
@@ -943,8 +946,15 @@ EOF
     { kubectl completion bash > /etc/bash_completion.d/kubectl; \
       kubeadm completion bash > /etc/bash_completion.d/kubadm; }
 
-  [ -f /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf ] && \
-    sed -i 's#^\[Service\]#[Service]\nCPUAccounting=true\nMemoryAccounting=true#g' /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf
+  [ ! -d /usr/lib/systemd/system/kubelet.service.d ] && mkdir -p /usr/lib/systemd/system/kubelet.service.d
+  cat << EOF > /usr/lib/systemd/system/kubelet.service.d/11-cgroup.conf
+[Service]
+CPUAccounting=true
+MemoryAccounting=true
+BlockIOAccounting=true
+ExecStartPre=/usr/bin/bash -c '/usr/bin/mkdir -p /sys/fs/cgroup/{cpuset,hugetlb}/{system,kube}.slice'
+Slice=kube.slice
+EOF
   systemctl daemon-reload
 
   systemctl enable kubelet
@@ -1487,34 +1497,44 @@ ipvs:
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
 maxPods: 1000
-# kubelet specific options here
 # 此配置保证了 kubelet 能在 swap 开启的情况下启动
 failSwapOn: false
 nodeStatusUpdateFrequency: 5s
-# 一些驱逐阀值，具体自行查文档修改
-evictionSoft:
-  'imagefs.available': '15%'
-  'memory.available': '512Mi'
-  'nodefs.available': '15%'
-  'nodefs.inodesFree': '10%'
-evictionSoftGracePeriod:
-  'imagefs.available': '3m'
-  'memory.available': '1m'
-  'nodefs.available': '3m'
-  'nodefs.inodesFree': '1m'
-evictionHard:
-  'imagefs.available': '10%'
-  'memory.available': '256Mi'
-  'nodefs.available': '10%'
-  'nodefs.inodesFree': '5%'
-evictionMaxPodGracePeriod: 30
+rotateCertificates: true
 imageGCLowThresholdPercent: 70
 imageGCHighThresholdPercent: 80
+# 软驱逐阀值
+evictionSoft:
+  imagefs.available: 15%
+  memory.available: 512Mi
+  nodefs.available: 15%
+  nodefs.inodesFree: 10%
+# 达到软阈值之后，持续时间超过多久才进行驱逐
+evictionSoftGracePeriod:
+  imagefs.available: 3m
+  memory.available: 1m
+  nodefs.available: 3m
+  nodefs.inodesFree: 1m
+# 硬驱逐阀值
+evictionHard:
+  imagefs.available: 10%
+  memory.available: 256Mi
+  nodefs.available: 10%
+  nodefs.inodesFree: 5%
+evictionMaxPodGracePeriod: 30
+# 节点资源预留
 kubeReserved:
-  'cpu': '500m'
-  'memory': '512Mi'
-  'ephemeral-storage': '1Gi'
-rotateCertificates: true
+  cpu: 200m\$(if [[ \$(cat /proc/meminfo | awk '/MemTotal/ {print \$2}') -gt 3670016 ]]; then echo -e '\n  memory: 256Mi';fi)
+  ephemeral-storage: 1Gi
+systemReserved:
+  cpu: 300m\$(if [[ \$(cat /proc/meminfo | awk '/MemTotal/ {print \$2}') -gt 3670016 ]]; then echo -e '\n  memory: 512Mi';fi)
+  ephemeral-storage: 1Gi
+kubeReservedCgroup: /kube.slice
+systemReservedCgroup: /system.slice
+enforceNodeAllocatable: 
+- pods
+- kube-reserved
+- system-reserved
 
 ---
 apiVersion: kubeadm.k8s.io/v1beta1
@@ -2183,10 +2203,11 @@ function add::monitor() {
    
     log::info "[monitor]" "apply prometheus manifests"
     command::exec "${MGMT_NODE}" "
+      $(declare -f utils::retry)
       cd \"${OFFLINE_DIR}/manifests/kube-prometheus-${KUBE_PROMETHEUS_VERSION}\" \
-      && kubectl apply -f manifests/setup/ \
+      && utils::retry 6 kubectl apply -f manifests/setup/ \
       && until kubectl get servicemonitors --all-namespaces ; do date; sleep 1; echo ''; done \
-      && kubectl apply -f manifests/
+      && utils::retry 6 kubectl apply -f manifests/
     "
     check::exit_code "$?" "apply" "add prometheus"
 
@@ -2734,12 +2755,9 @@ fi
     command::exec "${MGMT_NODE}" "
       $(declare -f utils::retry) 
       utils::retry 10 kubectl -n kubesphere-system get pods redis-ha-server-0
-      kubectl -n kubesphere-system get sts redis-ha-server -o yaml | sed 's#node-role.kubernetes.io/master#node-role.kubernetes.io/worker#g'  | kubectl apply -f -
-      kubectl -n kubesphere-system delete pods redis-ha-server-0
-
+      kubectl -n kubesphere-system get sts redis-ha-server -o yaml | sed 's#node-role.kubernetes.io/master#node-role.kubernetes.io/worker#g' | kubectl replace --force -f -
       utils::retry 10 kubectl -n kubesphere-system get pods openldap-0
-      kubectl -n kubesphere-system get sts openldap -o yaml | sed 's#node-role.kubernetes.io/master#node-role.kubernetes.io/worker#g'  | kubectl apply -f -
-      kubectl -n kubesphere-system delete pods openldap-0
+      kubectl -n kubesphere-system get sts openldap -o yaml | sed 's#node-role.kubernetes.io/master#node-role.kubernetes.io/worker#g' | kubectl replace --force -f -
     "
     check::exit_code "$?" "ui" "set statefulset to worker node"
 
