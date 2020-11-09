@@ -74,6 +74,7 @@ OFFLINE_DIR="/tmp/kainstall-offline-file/"
 OFFLINE_FILE=""
 OS_SUPPORT="centos7 centos8"
 GITHUB_PROXY="${GITHUB_PROXY:-https://gh.con.sh/}"
+SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
 
 trap trap::info 1 2 3 15 EXIT
 
@@ -1649,7 +1650,7 @@ function kubeadm::join() {
     kubeadm token create
   "
   get::command_output "INIT_TOKEN" "$?" "exit"
-  
+
   for host in $MASTER_NODES
   do
     [[ "${MGMT_NODE}" == "$host" ]] && continue || true
@@ -3090,6 +3091,17 @@ function del::node() {
   "
   get::command_output "cluster_nodes" "$?" exit
 
+  for host in $MASTER_NODES
+  do
+     command::exec "${MGMT_NODE}" "
+       etcd_pod=\$(kubectl -n kube-system get pods -l component=etcd --field-selector=status.phase=Running -o jsonpath='{\$.items[0].metadata.name}')
+       etcd_node=\$(kubectl -n kube-system exec \$etcd_pod -- sh -c \"export ETCDCTL_API=3 ETCDCTL_CACERT=/etc/kubernetes/pki/etcd/ca.crt ETCDCTL_CERT=/etc/kubernetes/pki/etcd/server.crt ETCDCTL_KEY=/etc/kubernetes/pki/etcd/server.key ETCDCTL_ENDPOINTS=https://127.0.0.1:2379; etcdctl member list\"| grep $host | awk -F, '{print \$1}')
+       echo \"\$etcd_pod \$etcd_node\"
+       kubectl -n kube-system exec \$etcd_pod -- sh -c \"export ETCDCTL_API=3 ETCDCTL_CACERT=/etc/kubernetes/pki/etcd/ca.crt ETCDCTL_CERT=/etc/kubernetes/pki/etcd/server.crt ETCDCTL_KEY=/etc/kubernetes/pki/etcd/server.key ETCDCTL_ENDPOINTS=https://127.0.0.1:2379; etcdctl member remove \$etcd_node; etcdctl member list\"
+     "
+     check::exit_code "$?" "del" "remove $host etcd member"
+  done
+
   for host in $MASTER_NODES $WORKER_NODES
   do
     log::info "[del]" "node $host"
@@ -3133,7 +3145,7 @@ function upgrade::cluster() {
   local local_version=""
   command::exec "${MGMT_NODE}" "kubeadm version -o short"
   get::command_output "local_version" "$?"
-  [ "$?" == "0" ]] && local_version="${local_version#v}" || true
+  [[ "$?" == "0" ]] && local_version="${local_version#v}" || true
 
   local stable_version="2"
   command::exec "127.0.0.1" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"
@@ -3162,13 +3174,15 @@ function upgrade::cluster() {
     fi
   fi
 
-  local node_hosts=""
-  command::exec "${MGMT_NODE}" "
-    kubectl get node -o jsonpath='{range.items[*]}{.metadata.name } {end}'
-  "
-  get::command_output "node_hosts" "$?" exit
+  local node_hosts="$MASTER_NODES $WORKER_NODES"
+  if [[ "$node_hosts" == " " ]]; then
+    command::exec "${MGMT_NODE}" "
+      kubectl get node -o jsonpath='{range.items[*]}{.metadata.name } {end}'
+    "
+    get::command_output "node_hosts" "$?" exit
+  fi
 
-  local plan=0
+  local skip_plan=${SKIP_UPGRADE_PLAN,,}
   for host in ${node_hosts}
   do
     log::info "[upgrade]" "node: $host"
@@ -3176,10 +3190,12 @@ function upgrade::cluster() {
     check::exit_code "$?" "upgrade" "drain ${host} node" "exit"
     sleep 5
 
-    if [[ ${plan} == "0" ]]; then
+    if [[ "${skip_plan}" == "false" ]]; then
       command::exec "${host}" "$(declare -f script::upgrage_kube); script::upgrage_kube 'init' '$KUBE_VERSION'"
       check::exit_code "$?" "upgrade" "plan and upgrade cluster on ${host}" "exit"
-      plan=1
+      command::exec "${host}" "$(declare -f utils::retry); utils::retry 10 kubectl get node"
+      check::exit_code "$?" "upgrade" "${host}: upgrade" "exit"
+      skip_plan=true
     else
       command::exec "${host}" "$(declare -f script::upgrage_kube); script::upgrage_kube 'node' '$KUBE_VERSION'"
       check::exit_code "$?" "upgrade" "upgrade ${host} node" "exit"
