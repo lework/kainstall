@@ -34,7 +34,8 @@ KUBERNETES_DASHBOARD_VERSION="${KUBERNETES_DASHBOARD_VERSION:-2.0.4}"
 KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.0.0}"
 
 # 集群配置
-KUBE_APISERVER="${KUBE_APISERVER:-apiserver.cluster.local}"
+KUBE_DNSDOMAIN="${KUBE_DNSDOMAIN:-cluster.local}"
+KUBE_APISERVER="${KUBE_APISERVER:-apiserver.$KUBE_DNSDOMAIN}"
 KUBE_POD_SUBNET="${KUBE_POD_SUBNET:-10.244.0.0/16}"
 KUBE_SERVICE_SUBNET="${KUBE_SERVICE_SUBNET:-10.96.0.0/16}"
 KUBE_IMAGE_REPO="${KUBE_IMAGE_REPO:-registry.aliyuncs.com/k8sxio}"
@@ -44,6 +45,7 @@ KUBE_MONITOR="${KUBE_MONITOR:-prometheus}"
 KUBE_STORAGE="${KUBE_STORAGE:-rook}"
 KUBE_LOG="${KUBE_LOG:-elasticsearch}"
 KUBE_UI="${KUBE_UI:-dashboard}"
+KUBE_ADDON="${KUBE_ADDON:-metrics-server}"
 
 # 定义的master和worker节点地址，以逗号分隔
 MASTER_NODES="${MASTER_NODES:-}"
@@ -1530,8 +1532,8 @@ kubeReserved:
 systemReserved:
   cpu: 300m\$(if [[ \$(cat /proc/meminfo | awk '/MemTotal/ {print \$2}') -gt 3670016 ]]; then echo -e '\n  memory: 512Mi';fi)
   ephemeral-storage: 1Gi
-kubeReservedCgroup: /kube.slice
-systemReservedCgroup: /system.slice
+kubeReservedCgroup: /kube
+systemReservedCgroup: /system
 enforceNodeAllocatable: 
 - pods
 - kube-reserved
@@ -1543,7 +1545,7 @@ kind: ClusterConfiguration
 kubernetesVersion: $KUBE_VERSION
 controlPlaneEndpoint: $KUBE_APISERVER:6443
 networking:
-  dnsDomain: cluster.local
+  dnsDomain: $KUBE_DNSDOMAIN
   podSubnet: $KUBE_POD_SUBNET
   serviceSubnet: $KUBE_SERVICE_SUBNET
 imageRepository: $KUBE_IMAGE_REPO
@@ -2179,19 +2181,38 @@ function add::network() {
 function add::addon() {
   # 添加addon组件
 
-  log::info "[addon]" "download metrics-server manifests"
-  local metrics_server_file="${OFFLINE_DIR}/manifests/metrics-server.yml"
+  if [[ "$KUBE_ADDON" == "metrics-server" ]]; then
+    log::info "[addon]" "download metrics-server manifests"
+    local metrics_server_file="${OFFLINE_DIR}/manifests/metrics-server.yml"
+    utils::download_file "https://github.com/kubernetes-sigs/metrics-server/releases/download/v${METRICS_SERVER_VERSION}/components.yaml" "${metrics_server_file}"
   
-  utils::download_file "https://github.com/kubernetes-sigs/metrics-server/releases/download/v${METRICS_SERVER_VERSION}/components.yaml" "${metrics_server_file}"
-
-  command::exec "${MGMT_NODE}" "
-    sed -i -e 's#k8s.gcr.io/metrics-server#$KUBE_IMAGE_REPO#g' \
-           -e '/--secure-port=4443/a\          - --kubelet-insecure-tls' \
-           -e '/--secure-port=4443/a\          - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname' \
-           \"${metrics_server_file}\"
-  "
-  check::exit_code "$?" "addon" "change metrics-server parameter"
-  kube::apply "${metrics_server_file}"
+    command::exec "${MGMT_NODE}" "
+      sed -i -e 's#k8s.gcr.io/metrics-server#$KUBE_IMAGE_REPO#g' \
+             -e '/--secure-port=4443/a\          - --kubelet-insecure-tls' \
+             -e '/--secure-port=4443/a\          - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname' \
+             \"${metrics_server_file}\"
+    "
+    check::exit_code "$?" "addon" "change metrics-server parameter"
+    kube::apply "${metrics_server_file}"
+  elif [[ "$KUBE_ADDON" == "nodelocaldns" ]]; then
+    log::info "[addon]" "download nodelocaldns manifests"
+    local nodelocaldns_file="${OFFLINE_DIR}/manifests/nodelocaldns.yaml"
+    utils::download_file "https://cdn.jsdelivr.net/gh/kubernetes/kubernetes@master/cluster/addons/dns/nodelocaldns/nodelocaldns.yaml" "${nodelocaldns_file}"
+  
+    command::exec "${MGMT_NODE}" "
+      cluster_dns=\$(kubectl -n kube-system get svc kube-dns -o jsonpath={.spec.clusterIP})
+      sed -i -e \"s/k8s.gcr.io/k8sgcr.lework.workers.dev/g\" \
+             -e \"s/__PILLAR__CLUSTER__DNS__/\$cluster_dns/g\" \
+             -e \"s/__PILLAR__LOCAL__DNS__/169.254.20.10/g\" \
+             -e \"s/[ |,]__PILLAR__DNS__SERVER__//g\" \
+             -e \"s/__PILLAR__DNS__DOMAIN__/$KUBE_DNSDOMAIN/g\" \
+             \"${nodelocaldns_file}\"
+    "
+    check::exit_code "$?" "addon" "change nodelocaldns parameter"
+    kube::apply "${nodelocaldns_file}"
+  else
+    log::warning "[addon]" "No $KUBE_ADDON config."
+  fi
 }
 
 
@@ -2558,7 +2579,7 @@ spec:
         image: fluent/fluentd-kubernetes-daemonset:v1.11.2-debian-elasticsearch7-1.0
         env:
           - name:  FLUENT_ELASTICSEARCH_HOST
-            value: elasticsearch.kube-logging.svc.cluster.local
+            value: elasticsearch.kube-logging.svc.${KUBE_DNSDOMAIN}
           - name:  FLUENT_ELASTICSEARCH_PORT
             value: '9200'
           - name: FLUENT_ELASTICSEARCH_SCHEME
@@ -3242,6 +3263,7 @@ Flag:
   -n,--network         cluster network, choose: [flannel,calico], default: ${KUBE_NETWORK}
   -i,--ingress         ingress controller, choose: [nginx,traefik], default: ${KUBE_INGRESS}
   -ui,--ui             cluster web ui, choose: [dashboard,kubesphere], default: ${KUBE_UI}
+  -a,--addon           cluster add-ons, choose: [metrics-server,nodelocaldns], default: ${KUBE_ADDON}
   -M,--monitor         cluster monitor, choose: [prometheus]
   -l,--log             cluster log, choose: [elasticsearch]
   -s,--storage         cluster storage, choose: [rook,longhorn]
@@ -3289,6 +3311,7 @@ Example:
   $0 add --log elasticsearch
   $0 add --storage rook
   $0 add --ui dashboard
+  $0 add --addon nodelocaldns
 
 EOF
   exit 1
@@ -3361,6 +3384,10 @@ while [ "${1:-}" != "" ]; do
                             UI_TAG=1
                             KUBE_UI=${1:-$KUBE_UI}
                             ;;
+    -a | --addon )          shift
+                            ADDON_TAG=1
+                            KUBE_ADDON=${1:-$KUBE_ADDON}
+                            ;;
     -U | --upgrade-kernel ) UPGRADE_KERNEL_TAG=1
                             ;;
     -of | --offline-file )  shift
@@ -3404,6 +3431,7 @@ elif [[ "x${ADD_TAG:-}" == "x1" ]]; then
   [[ "x${MONITOR_TAG:-}" == "x1" ]] && { add::monitor; add=1; } || true
   [[ "x${LOG_TAG:-}" == "x1" ]] && { add::log; add=1; } || true
   [[ "x${UI_TAG:-}" == "x1" ]] && { add::ui; add=1; } || true
+  [[ "x${ADDON_TAG:-}" == "x1" ]] && { add::addon; add=1; } || true
   [[ "$MASTER_NODES" != "" || "$WORKER_NODES" != "" ]] && { add::node; add=1; } || true
   [[ "${add:-}" != "1" ]] && help::usage || true
 elif [[ "x${DEL_TAG:-}" == "x1" ]]; then

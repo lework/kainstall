@@ -61,6 +61,7 @@ MEM: `4G`
 - 安装`log`组件，可选`elasticsearch`。
 - 安装`storage`组件，可选`rook`，`longhorn`。
 - 安装`web ui`组件，可选`dashboard`, `kubesphere`。
+- 安装`addon`组件，可选`metrics-server`, `nodelocaldns`。
 - 升级到`kubernetes`指定版本。
 - 更新集群证书。
 - 添加运维操作，如备份etcd快照。
@@ -78,6 +79,7 @@ MEM: `4G`
 | network | [flannel](https://github.com/coreos/flannel) | 0.13.0            | ![flannel release](https://img.shields.io/github/v/release/coreos/flannel) |
 | network | [calico](https://github.com/projectcalico/calico) | 3.16.3 | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
 | addons | [metrics server](https://github.com/kubernetes-sigs/metrics-server) | 0.3.7             | ![metrics-server release](https://img.shields.io/github/v/release/kubernetes-sigs/metrics-server) |
+| addons | [nodelocaldns](https://github.com/kubernetes/dns/tree/master/cmd/node-cache) | 1.15.16           | 1.15.16 |
 | ingress | [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.40.2            | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
 | ingress | [traefik](https://github.com/traefik/traefik) | 2.3.2            | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
 | monitor | [kube_prometheus](https://github.com/prometheus-operator/kube-prometheus) | 0.6.0             | ![kube-prometheus release](https://img.shields.io/github/v/release/prometheus-operator/kube-prometheus) |
@@ -107,6 +109,7 @@ wget https://cdn.jsdelivr.net/gh/lework/kainstall/kainstall.sh
 ```bash
 # bash kainstall.sh 
 
+
 Install kubernetes cluster using kubeadm.
 
 Usage:
@@ -131,6 +134,7 @@ Flag:
   -n,--network         cluster network, choose: [flannel,calico], default: flannel
   -i,--ingress         ingress controller, choose: [nginx,traefik], default: nginx
   -ui,--ui             cluster web ui, choose: [dashboard,kubesphere], default: dashboard
+  -a,--addon           cluster add-ons, choose: [metrics-server,nodelocaldns], default: metrics-server
   -M,--monitor         cluster monitor, choose: [prometheus]
   -l,--log             cluster log, choose: [elasticsearch]
   -s,--storage         cluster storage, choose: [rook,longhorn]
@@ -178,6 +182,7 @@ Example:
   kainstall.sh add --log elasticsearch
   kainstall.sh add --storage rook
   kainstall.sh add --ui dashboard
+  kainstall.sh add --addon nodelocaldns
 ```
 
 ### 初始化集群
@@ -273,6 +278,9 @@ bash kainstall.sh add --log elasticsearch
 # 添加 rook
 bash kainstall.sh add --storage rook
 
+# 添加 nodelocaldns
+bash kainstall.sh add --addon nodelocaldns
+
 # 升级版本
 bash kainstall.sh upgrade --version 1.19.3
 
@@ -304,7 +312,8 @@ KUBERNETES_DASHBOARD_VERSION="${KUBERNETES_DASHBOARD_VERSION:-2.0.4}"
 KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.0.0}"
 
 # 集群配置
-KUBE_APISERVER="${KUBE_APISERVER:-apiserver.cluster.local}"
+KUBE_DNSDOMAIN="${KUBE_DNSDOMAIN:-cluster.local}"
+KUBE_APISERVER="${KUBE_APISERVER:-apiserver.$KUBE_DNSDOMAIN}"
 KUBE_POD_SUBNET="${KUBE_POD_SUBNET:-10.244.0.0/16}"
 KUBE_SERVICE_SUBNET="${KUBE_SERVICE_SUBNET:-10.96.0.0/16}"
 KUBE_IMAGE_REPO="${KUBE_IMAGE_REPO:-registry.aliyuncs.com/k8sxio}"
@@ -314,6 +323,7 @@ KUBE_MONITOR="${KUBE_MONITOR:-prometheus}"
 KUBE_STORAGE="${KUBE_STORAGE:-rook}"
 KUBE_LOG="${KUBE_LOG:-elasticsearch}"
 KUBE_UI="${KUBE_UI:-dashboard}"
+KUBE_ADDON="${KUBE_ADDON:-metrics-server}"
 
 # 定义的master和worker节点地址，以逗号分隔
 MASTER_NODES="${MASTER_NODES:-}"
@@ -334,6 +344,7 @@ HOSTNAME_PREFIX="${HOSTNAME_PREFIX:-k8s}"
 
 # 脚本设置
 GITHUB_PROXY="${GITHUB_PROXY:-https://gh.lework.workers.dev/}"
+SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
 ```
 
 ### 离线部署
