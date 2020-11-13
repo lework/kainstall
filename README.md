@@ -80,7 +80,7 @@ MEM: `4G`
 | network | [calico](https://github.com/projectcalico/calico) | 3.16.5 | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
 | addons | [metrics server](https://github.com/kubernetes-sigs/metrics-server) | 0.4.0             | ![metrics-server release](https://img.shields.io/github/v/release/kubernetes-sigs/metrics-server) |
 | addons | [nodelocaldns](https://github.com/kubernetes/dns/tree/master/cmd/node-cache) | 1.15.16           | 1.15.16 |
-| ingress | [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.41.0            | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
+| ingress | [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.41.2            | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
 | ingress | [traefik](https://github.com/traefik/traefik) | 2.3.2            | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
 | monitor | [kube_prometheus](https://github.com/prometheus-operator/kube-prometheus) | 0.6.0             | ![kube-prometheus release](https://img.shields.io/github/v/release/prometheus-operator/kube-prometheus) |
 | log | [elasticsearch](https://github.com/elastic/elasticsearch) | 7.10.0            | ![elasticsearch release](https://img.shields.io/github/v/release/elastic/elasticsearch?sort=semver) |
@@ -301,7 +301,7 @@ DOCKER_VERSION="${DOCKER_VERSION:-latest}"
 KUBE_VERSION="${KUBE_VERSION:-latest}"
 FLANNEL_VERSION="${FLANNEL_VERSION:-0.13.0}"
 METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.4.0}"
-INGRESS_NGINX="${INGRESS_NGINX:-0.41.0}"
+INGRESS_NGINX="${INGRESS_NGINX:-0.41.2}"
 TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.3.2}"
 CALICO_VERSION="${CALICO_VERSION:-3.16.5}"
 KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.6.0}"
