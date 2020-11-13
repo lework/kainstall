@@ -77,14 +77,14 @@ MEM: `4G`
 | common | [docker-ce](https://github.com/docker/docker-ce) | latest             | ![docker-ce release](https://img.shields.io/github/v/release/docker/docker-ce?sort=semver) |
 | common | [kubernetes](https://github.com/kubernetes/kubernetes) | latest             | ![kubernetes release](https://img.shields.io/github/v/release/kubernetes/kubernetes?sort=semver) |
 | network | [flannel](https://github.com/coreos/flannel) | 0.13.0            | ![flannel release](https://img.shields.io/github/v/release/coreos/flannel) |
-| network | [calico](https://github.com/projectcalico/calico) | 3.16.3 | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
-| addons | [metrics server](https://github.com/kubernetes-sigs/metrics-server) | 0.3.7             | ![metrics-server release](https://img.shields.io/github/v/release/kubernetes-sigs/metrics-server) |
+| network | [calico](https://github.com/projectcalico/calico) | 3.16.5 | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
+| addons | [metrics server](https://github.com/kubernetes-sigs/metrics-server) | 0.4.0             | ![metrics-server release](https://img.shields.io/github/v/release/kubernetes-sigs/metrics-server) |
 | addons | [nodelocaldns](https://github.com/kubernetes/dns/tree/master/cmd/node-cache) | 1.15.16           | 1.15.16 |
-| ingress | [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.40.2            | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
+| ingress | [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.41.0            | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
 | ingress | [traefik](https://github.com/traefik/traefik) | 2.3.2            | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
 | monitor | [kube_prometheus](https://github.com/prometheus-operator/kube-prometheus) | 0.6.0             | ![kube-prometheus release](https://img.shields.io/github/v/release/prometheus-operator/kube-prometheus) |
-| log | [elasticsearch](https://github.com/elastic/elasticsearch) | 7.9.2             | ![elasticsearch release](https://img.shields.io/github/v/release/elastic/elasticsearch?sort=semver) |
-| storage | [rook](https://github.com/rook/rook) | 1.4.6 | ![rook release](https://img.shields.io/github/v/release/rook/rook?sort=semver) |
+| log | [elasticsearch](https://github.com/elastic/elasticsearch) | 7.10.0            | ![elasticsearch release](https://img.shields.io/github/v/release/elastic/elasticsearch?sort=semver) |
+| storage | [rook](https://github.com/rook/rook) | 1.4.7 | ![rook release](https://img.shields.io/github/v/release/rook/rook?sort=semver) |
 | storage | [longhorn](https://github.com/longhorn/longhorn) | 1.0.2 | ![longhorn release](https://img.shields.io/github/v/release/longhorn/longhorn?sort=semver) |
 | ui | [kubernetes_dashboard](https://github.com/kubernetes/dashboard) | 2.0.4             | ![kubernetes dashboard release](https://img.shields.io/github/v/release/kubernetes/dashboard?sort=semver) |
 | ui | [kubesphere](https://github.com/kubesphere/kubesphere) | 3.0.0            | ![kubesphere release](https://img.shields.io/github/v/release/kubesphere/kubesphere?sort=semver) |
@@ -300,13 +300,13 @@ DEBUG=1 bash kainstall.sh
 DOCKER_VERSION="${DOCKER_VERSION:-latest}"
 KUBE_VERSION="${KUBE_VERSION:-latest}"
 FLANNEL_VERSION="${FLANNEL_VERSION:-0.13.0}"
-METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.3.7}"
-INGRESS_NGINX="${INGRESS_NGINX:-0.40.2}"
+METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.4.0}"
+INGRESS_NGINX="${INGRESS_NGINX:-0.41.0}"
 TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.3.2}"
-CALICO_VERSION="${CALICO_VERSION:-3.16.3}"
+CALICO_VERSION="${CALICO_VERSION:-3.16.5}"
 KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.6.0}"
-ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.9.2}"
-ROOK_VERSION="${ROOK_VERSION:-1.4.6}"
+ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.10.0}"
+ROOK_VERSION="${ROOK_VERSION:-1.4.7}"
 LONGHORN_VERSION="${LONGHORN_VERSION:-1.0.2}"
 KUBERNETES_DASHBOARD_VERSION="${KUBERNETES_DASHBOARD_VERSION:-2.0.4}"
 KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.0.0}"

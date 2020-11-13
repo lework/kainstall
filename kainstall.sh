@@ -22,13 +22,13 @@ set -o pipefail         # Use last non-zero exit code in a pipeline
 DOCKER_VERSION="${DOCKER_VERSION:-latest}"
 KUBE_VERSION="${KUBE_VERSION:-latest}"
 FLANNEL_VERSION="${FLANNEL_VERSION:-0.13.0}"
-METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.3.7}"
-INGRESS_NGINX="${INGRESS_NGINX:-0.40.2}"
+METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.4.0}"
+INGRESS_NGINX="${INGRESS_NGINX:-0.41.0}"
 TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.3.2}"
-CALICO_VERSION="${CALICO_VERSION:-3.16.3}"
+CALICO_VERSION="${CALICO_VERSION:-3.16.5}"
 KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.6.0}"
-ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.9.2}"
-ROOK_VERSION="${ROOK_VERSION:-1.4.6}"
+ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.10.0}"
+ROOK_VERSION="${ROOK_VERSION:-1.4.7}"
 LONGHORN_VERSION="${LONGHORN_VERSION:-1.0.2}"
 KUBERNETES_DASHBOARD_VERSION="${KUBERNETES_DASHBOARD_VERSION:-2.0.4}"
 KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.0.0}"
@@ -2160,11 +2160,11 @@ function add::network() {
 
   elif [[ "$KUBE_NETWORK" == "calico" ]]; then
     log::info "[network]" "add calico"
-    utils::download_file "https://docs.projectcalico.org/manifests/calico.yaml" "${OFFLINE_DIR}/manifests/calico.yml"
+    utils::download_file "https://docs.projectcalico.org/manifests/calico.yaml" "${OFFLINE_DIR}/manifests/calico.yaml"
     utils::download_file "https://docs.projectcalico.org/manifests/calicoctl.yaml" "${OFFLINE_DIR}/manifests/calicoctl.yaml"
     
     command::exec "${MGMT_NODE}" "
-      sed -i "s#:v.*#:v${CALICO_VERSION}#g" \"${OFFLINE_DIR}/manifests/calico.yml\"
+      sed -i "s#:v.*#:v${CALICO_VERSION}#g" \"${OFFLINE_DIR}/manifests/calico.yaml\"
       sed -i "s#:v.*#:v${CALICO_VERSION}#g" \"${OFFLINE_DIR}/manifests/calicoctl.yaml\"
     "
     check::exit_code "$?" "network" "change calico version to ${CALICO_VERSION}"
@@ -2203,6 +2203,7 @@ function add::addon() {
       cluster_dns=\$(kubectl -n kube-system get svc kube-dns -o jsonpath={.spec.clusterIP})
       sed -i -e \"s/k8s.gcr.io/k8sgcr.lework.workers.dev/g\" \
              -e \"s/__PILLAR__CLUSTER__DNS__/\$cluster_dns/g\" \
+             -e \"s/__PILLAR__UPSTREAM__SERVERS__/\$cluster_dns/g\" \
              -e \"s/__PILLAR__LOCAL__DNS__/169.254.20.10/g\" \
              -e \"s/[ |,]__PILLAR__DNS__SERVER__//g\" \
              -e \"s/__PILLAR__DNS__DOMAIN__/$KUBE_DNSDOMAIN/g\" \
@@ -2576,7 +2577,7 @@ spec:
         effect: NoSchedule
       containers:
       - name: fluentd
-        image: fluent/fluentd-kubernetes-daemonset:v1.11.2-debian-elasticsearch7-1.0
+        image: fluent/fluentd-kubernetes-daemonset:v1.11.5-debian-elasticsearch7-1.0
         env:
           - name:  FLUENT_ELASTICSEARCH_HOST
             value: elasticsearch.kube-logging.svc.${KUBE_DNSDOMAIN}
