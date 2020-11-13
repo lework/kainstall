@@ -23,7 +23,7 @@ DOCKER_VERSION="${DOCKER_VERSION:-latest}"
 KUBE_VERSION="${KUBE_VERSION:-latest}"
 FLANNEL_VERSION="${FLANNEL_VERSION:-0.13.0}"
 METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.4.0}"
-INGRESS_NGINX="${INGRESS_NGINX:-0.41.2}"
+INGRESS_NGINX="${INGRESS_NGINX:-0.41.0}"
 TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.3.2}"
 CALICO_VERSION="${CALICO_VERSION:-3.16.5}"
 KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.6.0}"
@@ -76,6 +76,7 @@ OFFLINE_DIR="/tmp/kainstall-offline-file/"
 OFFLINE_FILE=""
 OS_SUPPORT="centos7 centos8"
 GITHUB_PROXY="${GITHUB_PROXY:-https://gh.con.sh/}"
+GCR_PROXY="${GCR_PROXY:-k8sgcr.lework.workers.dev}"
 SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
 
 trap trap::info 1 2 3 15 EXIT
@@ -626,6 +627,14 @@ EOF
 # @Desc    : ssh login banner
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+echo -e "\033[0;32m
+ ██╗  ██╗ █████╗ ███████╗
+ ██║ ██╔╝██╔══██╗██╔════╝
+ █████╔╝ ╚█████╔╝███████╗
+ ██╔═██╗ ██╔══██╗╚════██║
+ ██║  ██╗╚█████╔╝███████║
+ ╚═╝  ╚═╝ ╚════╝ ╚══════ by kainstall\033[0m"
+
 # os
 upSeconds="\$(cut -d. -f1 /proc/uptime)"
 secs=\$((\${upSeconds}%60))
@@ -670,7 +679,7 @@ totaldisk=\$(df -h -x devtmpfs -x tmpfs -x debugfs -x aufs -x overlay --total 2>
 disktotal=\$(awk '{print \$2}' <<< "\${totaldisk}")
 diskused=\$(awk '{print \$3}' <<< "\${totaldisk}")
 diskusedper=\$(awk '{print \$5}' <<< "\${totaldisk}")
-DISK_INFO="\033[0;33m\${diskused}\033[0m of \033[0;34m\${disktotal}\033[0m disk space used (\033[0;33m\${diskusedper}\033[0m)"
+DISK_INFO="\033[0;33m\${diskused}\033[0m of \033[1;34m\${disktotal}\033[0m disk space used (\033[0;33m\${diskusedper}\033[0m)"
 
 # cpu
 cpu=\$(awk -F':' '/^model name/ {print \$2}' /proc/cpuinfo | uniq | sed -e 's/^[ \t]*//')
@@ -681,10 +690,10 @@ CPU_INFO="\${cpu} \${cpup}P \${cpuc}C \${cpun}L"
 
 # get the load averages
 read one five fifteen rest < /proc/loadavg
-LOADAVG_INFO="\033[0;33m\${one}\033[0m / \${five} / \${fifteen} with \033[0;34m\$(( cpun*cpuc ))\033[0m core(s) at \033[0;34m\$(grep '^cpu MHz' /proc/cpuinfo | tail -1 | awk '{print \$4}')\033 MHz"
+LOADAVG_INFO="\033[0;33m\${one}\033[0m / \${five} / \${fifteen} with \033[1;34m\$(( cpun*cpuc ))\033[0m core(s) at \033[1;34m\$(grep '^cpu MHz' /proc/cpuinfo | tail -1 | awk '{print \$4}')\033 MHz"
 
 # mem
-MEM_INFO="\$(cat /proc/meminfo | awk '/MemTotal:/{total=\$2/1024/1024;next} /MemAvailable:/{use=total-\$2/1024/1024; printf("\033[0;33m%.2fGiB\033[0m of \033[0;34m%.2fGiB\033[0m RAM used (\033[0;33m%.2f%\033[0m)",use,total,(use/total)*100);}')"
+MEM_INFO="\$(cat /proc/meminfo | awk '/MemTotal:/{total=\$2/1024/1024;next} /MemAvailable:/{use=total-\$2/1024/1024; printf("\033[0;33m%.2fGiB\033[0m of \033[1;34m%.2fGiB\033[0m RAM used (\033[0;33m%.2f%\033[0m)",use,total,(use/total)*100);}')"
 
 # network
 # extranet_ip=" and \$(curl -s ip.cip.cc)"
@@ -694,15 +703,7 @@ IP_INFO="\$(ip a | grep glo | awk '{print \$2}' | head -1 | cut -f1 -d/)\${extra
 DOCKER_INFO="\$(sudo /usr/bin/docker info 2> /dev/null | awk '/Running:/{run=\$1\$2; next} /Paused:/{pause=\$1\$2;next} /Stopped:/{stop=\$1\$2;next} /Images:/{image=\$1\$2;printf("\033[0;33m%s\033[0m  %s  \033[0;33m%s\033[0m  %s" ,run, pause, stop, image)}')"
 
 # info
-echo -e "\033[0;32m
- ██╗  ██╗ █████╗ ███████╗
- ██║ ██╔╝██╔══██╗██╔════╝
- █████╔╝ ╚█████╔╝███████╗
- ██╔═██╗ ██╔══██╗╚════██║
- ██║  ██╗╚█████╔╝███████║
- ╚═╝  ╚═╝ ╚════╝ ╚══════ by kainstall
- \033[0m
-
+echo -e "
  Information as of: \033[1;34m\$(date +"%Y-%m-%d %T")\033[0m
  
  \033[0;1;31mProduct\033[0m............: \${MODEL_INFO}
@@ -710,7 +711,7 @@ echo -e "\033[0;32m
  \033[0;1;31mKernel\033[0m.............: \${KERNEL}
  \033[0;1;31mCPU\033[0m................: \${CPU_INFO}
 
- \033[0;1;31mHostname\033[0m...........: \033[0;34m\$(hostname)\033[0m
+ \033[0;1;31mHostname\033[0m...........: \033[1;34m\$(hostname)\033[0m
  \033[0;1;31mIP Addresses\033[0m.......: \033[1;34m\${IP_INFO}\033[0m
 
  \033[0;1;31mUptime\033[0m.............: \033[0;33m\${UPTIME_INFO}\033[0m
@@ -718,8 +719,8 @@ echo -e "\033[0;32m
  \033[0;1;31mLoad Averages\033[0m......: \${LOADAVG_INFO}
  \033[0;1;31mDisk Usage\033[0m.........: \${DISK_INFO} 
 
- \033[0;1;31mUsers online\033[0m.......: \033[0;34m\${USER_NUM}\033[0m
- \033[0;1;31mRunning Processes\033[0m..: \033[0;34m\${RUNNING}\033[0m
+ \033[0;1;31mUsers online\033[0m.......: \033[1;34m\${USER_NUM}\033[0m
+ \033[0;1;31mRunning Processes\033[0m..: \033[1;34m\${RUNNING}\033[0m
  \033[0;1;31mDocker Info\033[0m........: \${DOCKER_INFO}
 "
 EOF
@@ -1848,7 +1849,7 @@ function add::ingress() {
     local ingress_nginx_file="${OFFLINE_DIR}/manifests/ingress-nginx.yml"
     utils::download_file "https://cdn.jsdelivr.net/gh/kubernetes/ingress-nginx@controller-v${INGRESS_NGINX}/deploy/static/provider/baremetal/deploy.yaml" "${ingress_nginx_file}"
     command::exec "${MGMT_NODE}" "
-      sed -i -e 's#k8s.gcr.io#k8sgcr.lework.workers.dev#g' \
+      sed -i -e 's#k8s.gcr.io#${GCR_PROXY}#g' \
              -e 's#@sha256:.*\$##g' '${ingress_nginx_file}'
     "
     check::exit_code "$?" "ingress" "change ingress-nginx manifests"
@@ -1892,7 +1893,6 @@ rules:
       - ingresses/status
     verbs:
       - update
-
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1beta1
@@ -1906,13 +1906,11 @@ subjects:
   - kind: ServiceAccount
     name: ingress-traefik-controller
     namespace: default
-    
 --- 
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: ingress-traefik-controller
-
 ---
 kind: Deployment
 apiVersion: apps/v1
@@ -1920,7 +1918,6 @@ metadata:
   name: ingress-traefik-controller
   labels:
     app: ingress-traefik-controller
-
 spec:
   replicas: 1
   selector:
@@ -1992,7 +1989,6 @@ spec:
       restartPolicy: Always
       serviceAccount: ingress-traefik-controller
       serviceAccountName: ingress-traefik-controller
-
 ---
 apiVersion: v1
 kind: Service
@@ -2064,7 +2060,6 @@ spec:
           requests:
             cpu: 10m
             memory: 20Mi
-
 ---
 apiVersion: v1
 kind: Service
@@ -2117,7 +2112,6 @@ spec:
     - name: http
       port: 80
       targetPort: 80
-
 ---
 apiVersion: networking.k8s.io/v1beta1
 kind: Ingress
@@ -2188,8 +2182,8 @@ function add::addon() {
   
     command::exec "${MGMT_NODE}" "
       sed -i -e 's#k8s.gcr.io/metrics-server#$KUBE_IMAGE_REPO#g' \
-             -e '/--secure-port=4443/a\          - --kubelet-insecure-tls' \
-             -e '/--secure-port=4443/a\          - --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname' \
+             -e '/--secure-port=4443/a\        - --kubelet-insecure-tls' \
+             -e 's/--kubelet-preferred-address-types=.*/--kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname/g' \
              \"${metrics_server_file}\"
     "
     check::exit_code "$?" "addon" "change metrics-server parameter"
@@ -2201,7 +2195,7 @@ function add::addon() {
   
     command::exec "${MGMT_NODE}" "
       cluster_dns=\$(kubectl -n kube-system get svc kube-dns -o jsonpath={.spec.clusterIP})
-      sed -i -e \"s/k8s.gcr.io/k8sgcr.lework.workers.dev/g\" \
+      sed -i -e \"s/k8s.gcr.io/${GCR_PROXY}/g\" \
              -e \"s/__PILLAR__CLUSTER__DNS__/\$cluster_dns/g\" \
              -e \"s/__PILLAR__UPSTREAM__SERVERS__/\$cluster_dns/g\" \
              -e \"s/__PILLAR__LOCAL__DNS__/169.254.20.10/g\" \
@@ -2276,7 +2270,7 @@ spec:
     log::info "[monitor]" "add prometheus ingress"
     kube::apply "prometheus ingress" "
 ---
-apiVersion: extensions/v1beta1
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: grafana
@@ -2292,7 +2286,7 @@ spec:
           serviceName: grafana
           servicePort: 3000
 ---
-apiVersion: extensions/v1beta1
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: prometheus
@@ -2308,7 +2302,7 @@ spec:
           serviceName: prometheus-k8s
           servicePort: 9090
 ---
-apiVersion: extensions/v1beta1
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: alertmanager
@@ -2348,7 +2342,6 @@ kind: Namespace
 apiVersion: v1
 metadata:
   name: kube-logging
-  
 ---
 kind: Service
 apiVersion: v1
@@ -2409,7 +2402,7 @@ spec:
               fieldRef:
                 fieldPath: metadata.name
           - name: discovery.seed_hosts
-            value: 'es-cluster-0.elasticsearch,es-cluster-1.elasticsearch,es-cluster-2.elasticsearch'
+            value: 'es-cluster-0,es-cluster-1,es-cluster-2'
           - name: cluster.initial_master_nodes
             value: 'es-cluster-0,es-cluster-1,es-cluster-2'
           - name: ES_JAVA_OPTS
@@ -2439,7 +2432,7 @@ spec:
         securityContext:
           privileged: true
 ---
-apiVersion: extensions/v1beta1
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: elasticsearch
@@ -2500,7 +2493,7 @@ spec:
         ports:
         - containerPort: 5601
 ---
-apiVersion: extensions/v1beta1
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: kibana
@@ -2706,7 +2699,7 @@ function add::ui() {
     kube::apply "${dashboard_file}"
     kube::apply "kubernetes dashboard ingress" "
 ---
-apiVersion: extensions/v1beta1
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   annotations:
@@ -2811,6 +2804,10 @@ function add::ops() {
      kubeadm config images list --config=/etc/kubernetes/kubeadmcfg.yaml 2>/dev/null | grep etcd:
    "
    get::command_output "etcd_image" "$?"
+   command::exec "${MGMT_NODE}" "
+     kubectl get node --selector='node-role.kubernetes.io/master' --no-headers | wc -l
+   "
+   get::command_output "master_num" "$?"
 
    [[ "${master_num:-0}" == "0" ]] && master_num=1 || true
    kube::apply "etcd-snapshot" """
@@ -2907,6 +2904,10 @@ spec:
               path: /lib64
 """
   [[ "$?" == "" ]] && log::access "[ops]" "etcd backup directory: /var/lib/etcd/backups" || true
+  command::exec "${MGMT_NODE}" "
+    kubectl create job --from=cronjob/etcd-snapshot etcd-snapshot-$(date +%s) -n kube-system
+  "
+  check::exit_code "$?" "ops" "trigger etcd backup"
 }
 
 
@@ -3163,38 +3164,13 @@ function upgrade::cluster() {
   # 升级集群
 
   log::info "[upgrade]" "upgrade to $KUBE_VERSION"
-
-  local local_version=""
-  command::exec "${MGMT_NODE}" "kubeadm version -o short"
-  get::command_output "local_version" "$?"
-  [[ "$?" == "0" ]] && local_version="${local_version#v}" || true
+  log::info "[upgrade]" "backup cluster"
+  add::ops
 
   local stable_version="2"
   command::exec "127.0.0.1" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"
   get::command_output "stable_version" "$?"
   [[ "$?" == "0" ]] && stable_version="${stable_version#v}" || true
-
-  if [[ "${KUBE_VERSION}" != "latest" ]]; then
-    if [[ "${KUBE_VERSION}" == "${local_version}" ]];then
-      log::warning "[check]" "The specified version(${KUBE_VERSION}) is consistent with the local version(${local_version})!"
-      exit 1
-    fi
-
-    if [[ $(utils::version_to_number $KUBE_VERSION) -lt $(utils::version_to_number ${local_version}) ]];then
-      log::warning "[check]" "The specified version($KUBE_VERSION) is less than the local version(${local_version})!"
-      exit 1
-    fi
-
-    if [[ $(utils::version_to_number $KUBE_VERSION) -gt $(utils::version_to_number ${stable_version}) ]];then
-      log::warning "[check]" "The specified version($KUBE_VERSION) is more than the stable version(${stable_version})!"
-      exit 1
-    fi
-  else
-    if [[ $(utils::version_to_number ${local_version}) -ge $(utils::version_to_number ${stable_version}) ]];then
-      log::warning "[check]" "The local version($local_version) is greater or equal to the stable version(${stable_version})!"
-      exit 1
-    fi
-  fi
 
   local node_hosts="$MASTER_NODES $WORKER_NODES"
   if [[ "$node_hosts" == " " ]]; then
@@ -3207,6 +3183,33 @@ function upgrade::cluster() {
   local skip_plan=${SKIP_UPGRADE_PLAN,,}
   for host in ${node_hosts}
   do
+    local local_version=""
+    command::exec "${host}" "kubectl version --client --short | awk '{print \$3}'"
+    get::command_output "local_version" "$?"
+    [[ "$?" == "0" ]] && local_version="${local_version#v}" || true
+
+    if [[ "${KUBE_VERSION}" != "latest" ]]; then
+      if [[ "${KUBE_VERSION}" == "${local_version}" ]];then
+        log::warning "[check]" "The specified version(${KUBE_VERSION}) is consistent with the local version(${local_version})!"
+        continue
+      fi
+
+      if [[ $(utils::version_to_number $KUBE_VERSION) -lt $(utils::version_to_number ${local_version}) ]];then
+        log::warning "[check]" "The specified version($KUBE_VERSION) is less than the local version(${local_version})!"
+        continue
+      fi
+
+      if [[ $(utils::version_to_number $KUBE_VERSION) -gt $(utils::version_to_number ${stable_version}) ]];then
+        log::warning "[check]" "The specified version($KUBE_VERSION) is more than the stable version(${stable_version})!"
+        continue
+      fi
+    else
+      if [[ $(utils::version_to_number ${local_version}) -ge $(utils::version_to_number ${stable_version}) ]];then
+        log::warning "[check]" "The local version($local_version) is greater or equal to the stable version(${stable_version})!"
+        continue
+      fi
+    fi
+
     log::info "[upgrade]" "node: $host"
     command::exec "${MGMT_NODE}" "kubectl drain ${host} --ignore-daemonsets --delete-local-data"
     check::exit_code "$?" "upgrade" "drain ${host} node" "exit"

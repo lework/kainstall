@@ -56,7 +56,7 @@ MEM: `4G`
 - 安装`docker`, `kube`组件。
 - 初始化`kubernetes`集群,以及增加或删除节点。
 - 安装`ingress`组件，可选`nginx`，`traefik`。
-- 安装`network`组件，可选`flannel`，`calico`， 需在初始化时指定。
+- 安装`network`组件，可选`flannel`，`calico`。
 - 安装`monitor`组件，可选`prometheus`。
 - 安装`log`组件，可选`elasticsearch`。
 - 安装`storage`组件，可选`rook`，`longhorn`。
@@ -344,6 +344,7 @@ HOSTNAME_PREFIX="${HOSTNAME_PREFIX:-k8s}"
 
 # 脚本设置
 GITHUB_PROXY="${GITHUB_PROXY:-https://gh.lework.workers.dev/}"
+GCR_PROXY="${GCR_PROXY:-k8sgcr.lework.workers.dev}"
 SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
 ```
 
@@ -461,6 +462,7 @@ bash kainstall.sh add \
 ## 联系方式
 
 - [QQ群](https://qm.qq.com/cgi-bin/qm/qr?k=HwpkLUcmroLKNv37TlrHY-D3SXuLKMOd&jump_from=webapi)
+- [论坛](https://leops.cn/topics/node51)
 
 ## License
 
