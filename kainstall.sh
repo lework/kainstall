@@ -2270,7 +2270,7 @@ spec:
     log::info "[monitor]" "add prometheus ingress"
     kube::apply "prometheus ingress" "
 ---
-apiVersion: networking.k8s.io/v1
+apiVersion: networking.k8s.io/v1beta1
 kind: Ingress
 metadata:
   name: grafana
@@ -2286,7 +2286,7 @@ spec:
           serviceName: grafana
           servicePort: 3000
 ---
-apiVersion: networking.k8s.io/v1
+apiVersion: networking.k8s.io/v1beta1
 kind: Ingress
 metadata:
   name: prometheus
@@ -2302,7 +2302,7 @@ spec:
           serviceName: prometheus-k8s
           servicePort: 9090
 ---
-apiVersion: networking.k8s.io/v1
+apiVersion: networking.k8s.io/v1beta1
 kind: Ingress
 metadata:
   name: alertmanager
@@ -2432,7 +2432,7 @@ spec:
         securityContext:
           privileged: true
 ---
-apiVersion: networking.k8s.io/v1
+apiVersion: networking.k8s.io/v1beta1
 kind: Ingress
 metadata:
   name: elasticsearch
@@ -2493,7 +2493,7 @@ spec:
         ports:
         - containerPort: 5601
 ---
-apiVersion: networking.k8s.io/v1
+apiVersion: networking.k8s.io/v1beta1
 kind: Ingress
 metadata:
   name: kibana
@@ -2699,7 +2699,7 @@ function add::ui() {
     kube::apply "${dashboard_file}"
     kube::apply "kubernetes dashboard ingress" "
 ---
-apiVersion: networking.k8s.io/v1
+apiVersion: networking.k8s.io/v1beta1
 kind: Ingress
 metadata:
   annotations:
@@ -3066,7 +3066,7 @@ function init::cluster() {
   add::ui
   # 10. 添加monitor
   [[ "x${MONITOR_TAG:-}" == "x1" ]] && add::monitor || true
-  # 11. 添加monitor
+  # 11. 添加log
   [[ "x${LOG_TAG:-}" == "x1" ]] && add::log || true
   # 12. 运维操作
   add::ops
