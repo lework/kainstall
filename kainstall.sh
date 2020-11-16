@@ -789,7 +789,7 @@ cat << EOF >> /etc/audit/rules.d/audit.rules
 ## Kainstall managed end
 EOF
   chmod 600 /etc/audit/rules.d/audit.rules
-  sed -i 's#max_log_file = 8#max_log_file = 80#g' /etc/audit/auditd.conf 
+  sed -i 's#max_log_file =.*#max_log_file = 80#g' /etc/audit/auditd.conf 
   [ -f /usr/libexec/initscripts/legacy-actions/auditd/restart ] && \
      /usr/libexec/initscripts/legacy-actions/auditd/restart || \
      { systemctl stop auditd && systemctl start auditd; }
@@ -1823,7 +1823,7 @@ function get::ingress_conn(){
   local ingress_name="${2:-ingress-${KUBE_INGRESS}-controller}"
   
   command::exec "${MGMT_NODE}" "
-    kubectl get node --selector='node-role.kubernetes.io/worker' -o jsonpath='{range.items[*]}{ .status.addresses[?(@.type==\"InternalIP\")].address } {end}' | awk '{print \$1}'
+    kubectl get node -o jsonpath='{range .items[*]}{ .status.addresses[?(@.type==\"InternalIP\")].address} {.status.conditions[?(@.status == \"True\")].status}{\"\\n\"}{end}' | awk '/True/ {}END{print \$1}'
   "
   get::command_output "node_ip" "$?"
 
