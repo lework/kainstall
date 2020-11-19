@@ -239,7 +239,7 @@ function command::exec() {
       [ -f "${SSH_PRIVATE_KEY}" ] || { log::err "[exec]" "ssh private_key:${SSH_PRIVATE_KEY} not found."; exit 1; }
       ssh_cmd="${ssh_cmd} -i $SSH_PRIVATE_KEY"
     fi
-    log::exec "[command]" "${ssh_cmd//${SUDO_PASSWORD:-}/zzzzzz} ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c $(printf "%s" "${command//${SUDO_PASSWORD:-}/zzzzzz}")"
+    log::exec "[command]" "${ssh_cmd//${SSH_PASSWORD:-}/zzzzzz} ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c $(printf "%s" "${command//${SUDO_PASSWORD:-}/zzzzzz}")"
     COMMAND_OUTPUT=$(eval ${ssh_cmd} ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c '"${command}"' 2>> $LOG_FILE | tee -a $LOG_FILE)
     local status=$?
   fi
@@ -745,10 +745,11 @@ makestep 1.0 3
 logdir /var/log/chrony
 EOF
 
+  chronyd -q 'server 0.cn.pool.ntp.org iburst'
   systemctl enable chronyd
   systemctl start chronyd
-  chronyc sources -v > /dev/null
-  chronyc sourcestats > /dev/null
+  chronyc sources -v
+  chronyc sourcestats
 
   # ipvs
   yum install -y ipvsadm ipset sysstat conntrack libseccomp
@@ -2151,6 +2152,7 @@ function add::network() {
     "
     check::exit_code "$?" "flannel" "change flannel pod subnet"
     kube::apply "${flannel_file}"
+    kube::wait "flannel" "kube-system" "pods" "app=flannel"
 
   elif [[ "$KUBE_NETWORK" == "calico" ]]; then
     log::info "[network]" "add calico"
@@ -2165,6 +2167,8 @@ function add::network() {
     
     kube::apply "${OFFLINE_DIR}/manifests/calico.yaml"
     kube::apply "${OFFLINE_DIR}/manifests/calicoctl.yaml"
+    kube::wait "calico-kube-controllers" "kube-system" "pods" "k8s-app=calico-kube-controllers"
+    kube::wait "calico-node" "kube-system" "pods" "k8s-app=calico-node"
     
   else
     log::warning "[network]" "No $KUBE_NETWORK config."
@@ -3415,7 +3419,7 @@ while [ "${1:-}" != "" ]; do
 done
 
 # 开始
-log::info "[start]" "bash $0 ${SCRIPT_PARAMETER}"
+log::info "[start]" "bash $0 ${SCRIPT_PARAMETER//${SSH_PASSWORD:-${SUDO_PASSWORD:-}}/zzzzzz}"  
 
 # 转换
 MASTER_NODES=$(echo ${MASTER_NODES} | tr ',' ' ')
