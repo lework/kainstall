@@ -101,7 +101,7 @@ MEM: `4G`
 ### 下载脚本
 
 ```bash
-wget https://cdn.jsdelivr.net/gh/lework/kainstall/kainstall.sh
+wget https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall.sh
 ```
 
 ### 帮助信息
@@ -211,7 +211,7 @@ bash kainstall.sh init
 还可以使用一键安装方式, 连下载都省略了。
 
 ```bash
-bash -c "$(curl -sSL https://cdn.jsdelivr.net/gh/lework/kainstall/kainstall.sh)"  \
+bash -c "$(curl -sSL https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall.sh)"  \
   - init \
   --master 192.168.77.130,192.168.77.131,192.168.77.132 \
   --worker 192.168.77.133,192.168.77.134 \

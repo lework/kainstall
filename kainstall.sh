@@ -745,7 +745,7 @@ makestep 1.0 3
 logdir /var/log/chrony
 EOF
 
-  chronyd -q 'server 0.cn.pool.ntp.org iburst'
+  chronyd -q -t 1 'server cn.pool.ntp.org iburst maxsamples 1'
   systemctl enable chronyd
   systemctl start chronyd
   chronyc sources -v
@@ -1336,6 +1336,12 @@ function init::node_config() {
   local master_index=${master_index:-1}
   local worker_index=${worker_index:-1}
   
+  log::info "[init]" "Get $MGMT_NODE InternalIP."
+  command::exec "${MGMT_NODE}" "
+    ip -4 route get 8.8.8.8 2>/dev/null | head -1 | awk '{print \$7}'
+  "
+  get::command_output "MGMT_NODE_IP" "$?" "exit"
+
   # master
   for host in $MASTER_NODES
   do
@@ -1347,7 +1353,7 @@ function init::node_config() {
 
     # 设置主机名和解析
     command::exec "${host}" "
-      printf "\"${MGMT_NODE} $KUBE_APISERVER\\n$node_hosts\"" >> /etc/hosts
+      printf "\"${MGMT_NODE_IP} $KUBE_APISERVER\\n$node_hosts\"" >> /etc/hosts
       hostnamectl set-hostname ${HOSTNAME_PREFIX}-master-node${master_index}
     "
     check::exit_code "$?" "init" "$host set hostname and hostname resolution"
@@ -1672,7 +1678,7 @@ function kubeadm::join() {
     check::exit_code "$?" "kubeadm join" "$host: set kube config"
     
     command::exec "${host}" "
-      sed -i 's#${MGMT_NODE} $KUBE_APISERVER#127.0.0.1 $KUBE_APISERVER#g' /etc/hosts
+      sed -i 's#.*$KUBE_APISERVER#127.0.0.1 $KUBE_APISERVER#g' /etc/hosts
     "
   done
 
@@ -1687,10 +1693,9 @@ function kubeadm::join() {
   
     log::info "[kubeadm join]" "set $host worker node role."
     command::exec "${MGMT_NODE}" "
-      kubectl get node -o wide | grep "$host" | awk '{print \"kubectl label node \" \$1 \" node-role.kubernetes.io/worker= --overwrite\" }' | bash
+      kubectl get node --selector='!node-role.kubernetes.io/master' | grep '<none>' | awk '{print \"kubectl label node \" \$1 \" node-role.kubernetes.io/worker= --overwrite\" }' | bash
     "
     check::exit_code "$?" "kubeadm join" "set $host worker node role"
-    
   done
 }
 
@@ -2630,12 +2635,15 @@ function add::storage() {
 
   elif [[ "$KUBE_STORAGE" == "longhorn" ]]; then
     log::info "[storage]" "add longhorn"
-    log::info "[storage]"  "get cluster node hosts"
-    command::exec "${MGMT_NODE}" "
-      kubectl get node -o jsonpath='{\$.items[*].status.addresses[?(@.type==\"InternalIP\")].address}'
-    "
-    get::command_output "cluster_nodes" "$?" "exit"
-    
+    log::info "[storage]" "get cluster node hosts"
+    if [[ "${ADD_TAG:-}" == "1" ]]; then
+      command::exec "${MGMT_NODE}" "
+        kubectl get node -o jsonpath='{\$.items[*].status.addresses[?(@.type==\"InternalIP\")].address}'
+      "
+      get::command_output "cluster_nodes" "$?" "exit"
+    else
+      cluster_nodes="${MASTER_NODES} ${WORKER_NODES}"
+    fi
     for host in ${cluster_nodes:-}
     do
       log::info "[storage]"  "${host}: install iscsi-initiator-utils"
