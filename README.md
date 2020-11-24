@@ -68,6 +68,7 @@ MEM: `4G`
 - 支持**离线部署**。
 - 支持**sudo特权**。
 - 支持**10年证书期限**。
+- 支持脚本更新。
 
 ## 默认版本
 
@@ -120,8 +121,9 @@ Available Commands:
   reset           Reset Kubernetes cluster.
   add             Add nodes to the cluster.
   del             Remove node from the cluster.
-  upgrade         Upgrading kubeadm clusters.
   renew-cert      Renew all available certificates.
+  upgrade         Upgrading kubeadm clusters.
+  update          Update script file.
 
 Flag:
   -m,--master          master node, default: ''
@@ -177,6 +179,7 @@ Example:
   [other]
   kainstall.sh renew-cert --user root --password 123456
   kainstall.sh upgrade --version 1.19.3 --user root --password 123456
+  $0 update
   kainstall.sh add --ingress traefik
   kainstall.sh add --monitor prometheus
   kainstall.sh add --log elasticsearch
@@ -289,6 +292,9 @@ bash kainstall.sh renew-cert
 
 # debug模式
 DEBUG=1 bash kainstall.sh
+
+# 更新脚本
+bash kainstall.sh update
 ```
 
 ### 默认设置

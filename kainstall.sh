@@ -3250,6 +3250,18 @@ function upgrade::cluster() {
 }
 
 
+function update::self {
+  # 脚本文件更新
+  
+  log::info "[update]" "download kainstall script to $0"
+  command::exec "127.0.0.1" "
+    wget --timeout=10 --waitretry=3 --tries=5 --retry-connrefused https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall.sh -O "$0"
+    chmod +x "$0"
+  "
+  check::exit_code "$?" "update" "kainstall script"
+}
+
+
 function help::usage {
   # 使用帮助
   
@@ -3265,8 +3277,9 @@ Available Commands:
   reset           Reset Kubernetes cluster.
   add             Add nodes to the cluster.
   del             Remove node from the cluster.
-  upgrade         Upgrading kubeadm clusters.
   renew-cert      Renew all available certificates.
+  upgrade         Upgrading kubeadm clusters.
+  update          Update script file.
 
 Flag:
   -m,--master          master node, default: ''
@@ -3322,6 +3335,7 @@ Example:
   [other]
   $0 renew-cert --user root --password 123456
   $0 upgrade --version 1.19.3 --user root --password 123456
+  $0 update
   $0 add --ingress traefik
   $0 add --monitor prometheus
   $0 add --log elasticsearch
@@ -3351,9 +3365,11 @@ while [ "${1:-}" != "" ]; do
                             ;;
     del )                   DEL_TAG=1
                             ;;
+    renew-cert )            RENEW_CERT_TAG=1
+                            ;;
     upgrade )               UPGRADE_TAG=1
                             ;;
-    renew-cert )            RENEW_CERT_TAG=1
+    update )                UPDATE_TAG=1
                             ;;
     -m | --master )         shift
                             MASTER_NODES=${1:-$MASTER_NODES}
@@ -3454,10 +3470,12 @@ elif [[ "x${DEL_TAG:-}" == "x1" ]]; then
   [[ "$MASTER_NODES" != "" || "$WORKER_NODES" != "" ]] && del::node || help::usage
 elif [[ "x${RESET_TAG:-}" == "x1" ]]; then
   reset::cluster
-elif [[ "x${UPGRADE_TAG:-}" == "x1" ]]; then
-  upgrade::cluster
 elif [[ "x${RENEW_CERT_TAG:-}" == "x1" ]]; then
   cert::renew
+elif [[ "x${UPGRADE_TAG:-}" == "x1" ]]; then
+  upgrade::cluster
+elif [[ "x${UPDATE_TAG:-}" == "x1" ]]; then
+  update::self
 else
   help::usage
 fi
