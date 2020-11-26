@@ -2161,12 +2161,12 @@ function add::network() {
 
   elif [[ "$KUBE_NETWORK" == "calico" ]]; then
     log::info "[network]" "add calico"
-    utils::download_file "https://docs.projectcalico.org/manifests/calico.yaml" "${OFFLINE_DIR}/manifests/calico.yaml"
-    utils::download_file "https://docs.projectcalico.org/manifests/calicoctl.yaml" "${OFFLINE_DIR}/manifests/calicoctl.yaml"
+    utils::download_file "https://docs.projectcalico.org/v${CALICO_VERSION%.*}/manifests/calico.yaml" "${OFFLINE_DIR}/manifests/calico.yaml"
+    utils::download_file "https://docs.projectcalico.org/v${CALICO_VERSION%.*}/manifests/calicoctl.yaml" "${OFFLINE_DIR}/manifests/calicoctl.yaml"
     
     command::exec "${MGMT_NODE}" "
-      sed -i "s#:v.*#:v${CALICO_VERSION}#g" \"${OFFLINE_DIR}/manifests/calico.yaml\"
-      sed -i "s#:v.*#:v${CALICO_VERSION}#g" \"${OFFLINE_DIR}/manifests/calicoctl.yaml\"
+      sed -i \"s#:v.*#:v${CALICO_VERSION}#g\" \"${OFFLINE_DIR}/manifests/calico.yaml\"
+      sed -i \"s#:v.*#:v${CALICO_VERSION}#g\" \"${OFFLINE_DIR}/manifests/calicoctl.yaml\"
     "
     check::exit_code "$?" "network" "change calico version to ${CALICO_VERSION}"
     
