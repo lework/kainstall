@@ -4,15 +4,11 @@
 
 使用 shell 脚本, 基于 kubeadm 一键部署 kubernetes 集群
 
-
-
-## 为什么？
+## 为什么
 
 **为什么要搞这个？Ansible PlayBook 不好么？**
 
 **因为懒**，Ansible PlayBook 编排是非常给力的，不过需要安装 Python 和 Ansible, 且需要下载多个 yaml 文件 。**因为懒**，我想要个更简单的方式来**快速部署**一个分布式的 **Kubernetes HA** 集群， 使用 **shell** 脚本可以不借助外力直接在服务器上运行，省时省力。 并且 shell 脚本只有一个文件，文件大小**100 KB 左右**，非常小巧，可以实现一条命令安装集群的超快体验，而且配合**离线安装包**，可以在不联网的环境下安装集群，这体验真的**非常爽**啊。
-
-
 
 ## 要求
 
@@ -26,17 +22,11 @@ MEM: `4G`
 
 > 未指定离线包时，需要连通外网，用于下载 kube 组件和 docker 镜像。
 
-
-
 ## 架构
 
-
-
-![](./images/k8s-node-ha.png)
+![k8s-node-ha](./images/k8s-node-ha.png)
 
 > 如需按照步骤安装集群，可参考 [https://lework.github.io/2019/10/01/kubeadm-install/](https://lework.github.io/2019/10/01/kubeadm-install/)
-
-
 
 ## 功能
 
@@ -74,7 +64,6 @@ MEM: `4G`
 
 ## 默认版本
 
-
 | 分类                                           | 软件                                             | kainstall 默认版本 | 软件最新版本                                                 |
 | ------------------------------------------------ | ------------------ | ------------------------------------------------------------ | ------------------------------------------------ |
 | common | [docker-ce](https://github.com/docker/docker-ce) | latest             | ![docker-ce release](https://img.shields.io/github/v/release/docker/docker-ce?sort=semver) |
@@ -92,10 +81,7 @@ MEM: `4G`
 | ui | [kubernetes_dashboard](https://github.com/kubernetes/dashboard) | 2.0.4             | ![kubernetes dashboard release](https://img.shields.io/github/v/release/kubernetes/dashboard?sort=semver) |
 | ui | [kubesphere](https://github.com/kubesphere/kubesphere) | 3.0.0            | ![kubesphere release](https://img.shields.io/github/v/release/kubesphere/kubesphere?sort=semver) |
 
-
 除 **kube组件** 版本可以通过参数(`--version`) 指定外，其他的软件版本需在脚本中指定。
-
-
 
 ## 使用
 
@@ -211,6 +197,7 @@ export SSH_PORT="22"
 export KUBE_VERSION="1.19.3"
 bash kainstall.sh init
 ```
+
 > 默认情况下，除了初始化集群外，还会安装 `ingress: nginx` , `ui: dashboard` 两个组件。
 
 还可以使用一键安装方式, 连下载都省略了。
@@ -244,6 +231,7 @@ bash kainstall.sh add --master 192.168.77.135,192.168.77.136 --worker 192.168.77
 ### 删除节点
 
 > 操作需在 k8s master 节点上操作，ssh连接信息非默认时请指定
+
 ```bash
 # 删除单个master节点
 bash kainstall.sh del --master 192.168.77.135
@@ -267,8 +255,7 @@ bash kainstall.sh reset \
 ### 其他操作
 
 > 操作需在 k8s master 节点上操作，ssh连接信息非默认时请指定
-
-**注意：** 添加组件时请保持节点的内存和cpu至少为`2C4G`的空闲。否则会导致节点下线且服务器卡死。
+> **注意：** 添加组件时请保持节点的内存和cpu至少为`2C4G`的空闲。否则会导致节点下线且服务器卡死。
 
 ```bash
 # 添加 nginx ingress
@@ -301,7 +288,7 @@ bash kainstall.sh update
 
 ### 默认设置
 
-**注意:** 以下变量都在脚本文件的`environment configuration`部分。可根据需要自行修改，或者为变量设置同名的**环境变量**修改其默认内容。
+> **注意:** 以下变量都在脚本文件的`environment configuration`部分。可根据需要自行修改，或者为变量设置同名的**环境变量**修改其默认内容。
 
 ```bash
 # 版本
@@ -358,46 +345,43 @@ SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
 
 ### 离线部署
 
-**注意**
-
-脚本执行的宿主机上，需要安装 `tar` 命令，用于解压离线包。
-
+> **注意**, 脚本执行的宿主机上，需要安装 `tar` 命令，用于解压离线包。
 > 详细部署请见: [https://lework.github.io/2020/10/18/kainstall-offline/](https://lework.github.io/2020/10/18/kainstall-offline/)
 
+1. 下载指定版本的离线包
 
-**下载指定版本的离线包**
+    ```bash
+    wget http://kainstall.oss-cn-shanghai.aliyuncs.com/1.19.3/centos7.tgz
+    ```
 
-```bash
-wget http://kainstall.oss-cn-shanghai.aliyuncs.com/1.19.3/centos7.tgz
-```
-> 更多离线包信息，见 [kainstall-offline](https://github.com/lework/kainstall-offline) 仓库
+    > 更多离线包信息，见 [kainstall-offline](https://github.com/lework/kainstall-offline) 仓库
 
+2. 初始化集群
 
-**初始化集群**
+    > 指定 `--offline-file` 参数。
 
-> 指定 `--offline-file` 参数。
+    ```bash
+    bash kainstall.sh init \
+      --master 192.168.77.130,192.168.77.131,192.168.77.132 \
+      --worker 192.168.77.133,192.168.77.134 \
+      --offline-file centos7.tgz
+    ```
 
-```bash
-bash kainstall.sh init \
-  --master 192.168.77.130,192.168.77.131,192.168.77.132 \
-  --worker 192.168.77.133,192.168.77.134 \
-  --offline-file centos7.tgz
-```
+3. 添加节点
 
-**添加节点**
+    > 指定 --offline-file 参数。
 
-> 指定 --offline-file 参数。
-
-```bash
-bash kainstall.sh add \
-  --master 192.168.77.135 \
-  --worker 192.168.77.136 \
-  --offline-file centos7.tgz
-```
+    ```bash
+    bash kainstall.sh add \
+      --master 192.168.77.135 \
+      --worker 192.168.77.136 \
+      --offline-file centos7.tgz
+    ```
 
 ### sudo 特权
 
 创建 sudo 用户
+
 ```bash
 useradd test
 passwd test --stdin <<< "12345678"
@@ -405,11 +389,13 @@ echo 'test    ALL=(ALL)   ALL' >> /etc/sudoers
 ```
 
 sudo 参数
+
 - `--sudo` 开启 sudo 特权
 - `--sudo-user` 指定 sudo 用户, 默认是 `root`
 - `--sudo-password` 指定 sudo 密码
 
 示例
+
 ```bash
 # 初始化
 bash kainstall.sh init \
@@ -445,6 +431,7 @@ bash kainstall.sh add \
 在初始化或添加时，加上 `--10years` 参数，就可以使用`kubeadm` 10 years 的客户端
 
 示例
+
 ```bash
 # 初始化
 bash kainstall.sh init \
