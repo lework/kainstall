@@ -34,7 +34,7 @@ MEM: `4G`
 
 ![](./images/k8s-node-ha.png)
 
-> 如需按照步骤安装集群，可参考 https://lework.github.io/2019/10/01/kubeadm-install/
+> 如需按照步骤安装集群，可参考 [https://lework.github.io/2019/10/01/kubeadm-install/](https://lework.github.io/2019/10/01/kubeadm-install/)
 
 
 
@@ -110,7 +110,7 @@ wget https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall.sh
 ### 帮助信息
 
 ```bash
-# bash kainstall.sh 
+# bash kainstall.sh
 
 
 Install kubernetes cluster using kubeadm.
@@ -177,7 +177,7 @@ Example:
   --worker 192.168.77.143,192.168.77.144 \
   --user root \
   --password 123456
- 
+
   [other]
   kainstall.sh renew-cert --user root --password 123456
   kainstall.sh upgrade --version 1.19.3 --user root --password 123456
@@ -381,7 +381,7 @@ wget http://kainstall.oss-cn-shanghai.aliyuncs.com/1.19.3/centos7.tgz
 bash kainstall.sh init \
   --master 192.168.77.130,192.168.77.131,192.168.77.132 \
   --worker 192.168.77.133,192.168.77.134 \
-  --offline-file centos7.tgz 
+  --offline-file centos7.tgz
 ```
 
 **添加节点**
