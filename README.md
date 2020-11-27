@@ -1,5 +1,7 @@
 # kainstall  =  kubeadm install kubernetes
 
+[![GitHub Super-Linter](https://github.com/lework/kainstall/workflows/Lint%20Code%20Base/badge.svg)](https://github.com/marketplace/actions/super-linter)
+
 使用 shell 脚本, 基于 kubeadm 一键部署 kubernetes 集群
 
 
