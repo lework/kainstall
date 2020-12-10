@@ -1,0 +1,1 @@
+git update-index --chmod=+x kainstall.sh
