@@ -46,6 +46,7 @@ KUBE_STORAGE="${KUBE_STORAGE:-rook}"
 KUBE_LOG="${KUBE_LOG:-elasticsearch}"
 KUBE_UI="${KUBE_UI:-dashboard}"
 KUBE_ADDON="${KUBE_ADDON:-metrics-server}"
+KUBE_FLANNEL_TYPE="${KUBE_FLANNEL_TYPE:-vxlan}"
 
 # 定义的master和worker节点地址，以逗号分隔
 MASTER_NODES="${MASTER_NODES:-}"
@@ -2168,6 +2169,10 @@ function add::network() {
     
     command::exec "${MGMT_NODE}" "
       sed -i 's#10.244.0.0/16#$KUBE_POD_SUBNET#g' \"${flannel_file}\"
+      sed -i 's#\"Type\": \"vxlan\"#\"Type\": \"${KUBE_FLANNEL_TYPE}\"#g' \"${flannel_file}\"
+      if [[ \"${KUBE_FLANNEL_TYPE}\" == \"vxlan\" ]]; then
+        sed -i 's#\"Type\": \"vxlan\"#\"Type\": \"vxlan\", \"DirectRouting\": true#g' \"${flannel_file}\"
+      fi
     "
     check::exit_code "$?" "flannel" "change flannel pod subnet"
     kube::apply "${flannel_file}"
@@ -2179,8 +2184,9 @@ function add::network() {
     utils::download_file "https://docs.projectcalico.org/v${CALICO_VERSION%.*}/manifests/calicoctl.yaml" "${OFFLINE_DIR}/manifests/calicoctl.yaml"
     
     command::exec "${MGMT_NODE}" "
-      sed -i \"s#:v.*#:v${CALICO_VERSION}#g\" "${OFFLINE_DIR}/manifests/calico.yaml"
-      sed -i \"s#:v.*#:v${CALICO_VERSION}#g\" "${OFFLINE_DIR}/manifests/calicoctl.yaml"
+      sed -i \"s#:v.*#:v${CALICO_VERSION}#g\" \"${OFFLINE_DIR}/manifests/calico.yaml\"
+      sed -i 's#value: \"Always\"#value: \"CrossSubnet\"#g' \"${OFFLINE_DIR}/manifests/calico.yaml\"
+      sed -i \"s#:v.*#:v${CALICO_VERSION}#g\" \"${OFFLINE_DIR}/manifests/calicoctl.yaml\"
     "
     check::exit_code "$?" "network" "change calico version to ${CALICO_VERSION}"
     
