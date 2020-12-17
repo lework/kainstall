@@ -840,7 +840,7 @@ function script::upgrage_kube() {
   echo '[upgrade]'
   if [[ "$role" == "init" ]]; then
     local plan_info; plan_info=$(kubeadm upgrade plan)
-    local v; v=$(printf "%s" "$plan_info" | grep 'kubeadm upgrade apply ' | awk '{print $4}')
+    local v; v=$(printf "%s" "$plan_info" | grep 'kubeadm upgrade apply ' | awk '{print $4}'| tail -1 )
     printf "%s\n" "${plan_info}"
     kubeadm upgrade apply "${v}" -y
   else
@@ -849,7 +849,7 @@ function script::upgrage_kube() {
 
   echo '[install] kubelet kubectl'
   kubectl version --client=true
-  yum install -y "kubelet${version} kubectl${version}" --disableexcludes=kubernetes
+  yum install -y "kubelet${version}" "kubectl${version}" --disableexcludes=kubernetes
   kubectl version --client=true
 
   [ -f /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf ] && \
