@@ -71,7 +71,7 @@ MEM: `4G`
 | network | [flannel](https://github.com/coreos/flannel) | 0.13.0            | ![flannel release](https://img.shields.io/github/v/release/coreos/flannel) |
 | network | [calico](https://github.com/projectcalico/calico) | 3.17.1 | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
 | addons | [metrics server](https://github.com/kubernetes-sigs/metrics-server) | 0.4.1             | ![metrics-server release](https://img.shields.io/github/v/release/kubernetes-sigs/metrics-server) |
-| addons | [nodelocaldns](https://github.com/kubernetes/dns/tree/master/cmd/node-cache) | 1.15.16           | 1.15.16 |
+| addons | [nodelocaldns](https://github.com/kubernetes/dns/tree/master/cmd/node-cache) | 1.16.0           | 1.16.0 |
 | ingress | [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.41.2            | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
 | ingress | [traefik](https://github.com/traefik/traefik) | 2.3.6            | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
 | monitor | [kube_prometheus](https://github.com/prometheus-operator/kube-prometheus) | 0.7.0             | ![kube-prometheus release](https://img.shields.io/github/v/release/prometheus-operator/kube-prometheus) |
@@ -167,7 +167,7 @@ Example:
   [other]
   kainstall.sh renew-cert --user root --password 123456
   kainstall.sh upgrade --version 1.19.3 --user root --password 123456
-  $0 update
+  kainstall.sh update
   kainstall.sh add --ingress traefik
   kainstall.sh add --monitor prometheus
   kainstall.sh add --log elasticsearch
@@ -186,7 +186,7 @@ bash kainstall.sh init \
   --user root \
   --password 123456 \
   --port 22 \
-  --version 1.19.3
+  --version 1.20.1
 
 # 使用环境变量
 export MASTER_NODES="192.168.77.130,192.168.77.131,192.168.77.132"
@@ -194,7 +194,7 @@ export WORKER_NODES="192.168.77.133,192.168.77.134"
 export SSH_USER="root"
 export SSH_PASSWORD="123456"
 export SSH_PORT="22"
-export KUBE_VERSION="1.19.3"
+export KUBE_VERSION="1.20.1"
 bash kainstall.sh init
 ```
 
@@ -210,7 +210,7 @@ bash -c "$(curl -sSL https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainsta
   --user root \
   --password 123456 \
   --port 22 \
-  --version 1.19.3
+  --version 1.20.1
 ```
 
 ### 增加节点
@@ -274,7 +274,7 @@ bash kainstall.sh add --storage rook
 bash kainstall.sh add --addon nodelocaldns
 
 # 升级版本
-bash kainstall.sh upgrade --version 1.19.3
+bash kainstall.sh upgrade --version 1.20.1
 
 # 重新颁发证书
 bash kainstall.sh renew-cert
@@ -352,7 +352,7 @@ SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
 1. 下载指定版本的离线包
 
     ```bash
-    wget http://kainstall.oss-cn-shanghai.aliyuncs.com/1.19.3/centos7.tgz
+    wget http://kainstall.oss-cn-shanghai.aliyuncs.com/1.20.1/centos7.tgz
     ```
 
     > 更多离线包信息，见 [kainstall-offline](https://github.com/lework/kainstall-offline) 仓库
@@ -365,6 +365,7 @@ SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
     bash kainstall.sh init \
       --master 192.168.77.130,192.168.77.131,192.168.77.132 \
       --worker 192.168.77.133,192.168.77.134 \
+      --version 1.20.1 \
       --offline-file centos7.tgz
     ```
 
@@ -376,6 +377,7 @@ SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
     bash kainstall.sh add \
       --master 192.168.77.135 \
       --worker 192.168.77.136 \
+      --version 1.20.1 \
       --offline-file centos7.tgz
     ```
 
@@ -405,7 +407,7 @@ bash kainstall.sh init \
   --user test \
   --password 12345678 \
   --port 22 \
-  --version 1.19.3 \
+  --version 1.20.1 \
   --sudo \
   --sudo-user root \
   --sudo-password 12345678
@@ -417,10 +419,13 @@ bash kainstall.sh add \
   --user test \
   --password 12345678 \
   --port 22 \
-  --version 1.19.3 \
+  --version 1.20.1 \
   --sudo \
   --sudo-user root \
   --sudo-password 12345678
+
+# 更新脚本文件
+bash kainstall.sh update
 ```
 
 ### 10年证书期限
@@ -441,7 +446,7 @@ bash kainstall.sh init \
   --user root \
   --password 123456 \
   --port 22 \
-  --version 1.19.3 \
+  --version 1.20.1 \
   --10years
   
 # 添加
@@ -451,7 +456,7 @@ bash kainstall.sh add \
   --user root \
   --password 123456 \
   --port 22 \
-  --version 1.19.3 \
+  --version 1.20.1 \
   --10years
 ```
 

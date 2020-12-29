@@ -1846,7 +1846,7 @@ function get::ingress_conn(){
   local ingress_name="${2:-ingress-${KUBE_INGRESS}-controller}"
   
   command::exec "${MGMT_NODE}" "
-    kubectl get node -o jsonpath='{range .items[*]}{ .status.addresses[?(@.type==\"InternalIP\")].address} {.status.conditions[?(@.status == \"True\")].status}{\"\\n\"}{end}' | awk '/True/ {}END{print \$1}'
+    kubectl get node -o jsonpath='{range .items[*]}{ .status.addresses[?(@.type==\"InternalIP\")].address} {.status.conditions[?(@.status == \"True\")].status}{\"\\n\"}{end}' | awk '{if(\$2==\"True\")a=\$1}END{print a}'
   "
   get::command_output "node_ip" "$?"
 
@@ -2211,8 +2211,8 @@ function add::addon() {
   
     command::exec "${MGMT_NODE}" "
       sed -i -e 's#k8s.gcr.io/metrics-server#$KUBE_IMAGE_REPO#g' \
-             -e '/--secure-port=4443/a\        - --kubelet-insecure-tls' \
-             -e 's/--kubelet-preferred-address-types=.*/--kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname/g' \
+             -e '/--kubelet-preferred-address-types=.*/d' \
+             -e 's/\\(.*\\)- --secure-port=4443/\\1- --secure-port=4443\\n\\1- --kubelet-insecure-tls\\n\\1- --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname/g' \
              \"${metrics_server_file}\"
     "
     check::exit_code "$?" "addon" "change metrics-server parameter"
@@ -3041,11 +3041,12 @@ function offline::load() {
 
     
     log::info "[offline]" "${role} ${host}: install package"
-    command::exec "${host}" "yum localinstall -y --disablerepo=* --skip-broken ${OFFLINE_DIR}/*.rpm"
+    command::exec "${host}" "yum localinstall -y --skip-broken ${OFFLINE_DIR}/*.rpm"
     check::exit_code "$?" "offline" "${role} ${host}: install package" "exit"
   
     if [[ "x${UPGRADE_KERNEL_TAG:-}" != "x1" ]]; then
       command::exec "${host}" "
+        set -e
         systemctl start docker && \
         cd ${OFFLINE_DIR} && \
         gzip -d -c ${1}.tgz | docker load && gzip -d -c all.tgz | docker load
