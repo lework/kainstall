@@ -2943,7 +2943,9 @@ spec:
 """
   [[ "$?" == "" ]] && log::access "[ops]" "etcd backup directory: /var/lib/etcd/backups"
   command::exec "${MGMT_NODE}" "
-    kubectl create job --from=cronjob/etcd-snapshot etcd-snapshot-$(date +%s) -n kube-system
+    jobname=\"etcd-snapshot-$(date +%s)\"
+    kubectl create job --from=cronjob/etcd-snapshot \${jobname} -n kube-system && \
+    kubectl wait --for=condition=complete job/\${jobname} -n kube-system
   "
   check::exit_code "$?" "ops" "trigger etcd backup"
 }
