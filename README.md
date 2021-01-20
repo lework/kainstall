@@ -72,11 +72,11 @@ MEM: `4G`
 | network | [calico](https://github.com/projectcalico/calico) | 3.17.1 | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
 | addons | [metrics server](https://github.com/kubernetes-sigs/metrics-server) | 0.4.1             | ![metrics-server release](https://img.shields.io/github/v/release/kubernetes-sigs/metrics-server) |
 | addons | [nodelocaldns](https://github.com/kubernetes/dns/tree/master/cmd/node-cache) | 1.16.0           | 1.16.0 |
-| ingress | [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.41.2            | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
-| ingress | [traefik](https://github.com/traefik/traefik) | 2.3.6            | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
+| ingress | [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.43.0            | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
+| ingress | [traefik](https://github.com/traefik/traefik) | 2.3.7            | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
 | monitor | [kube_prometheus](https://github.com/prometheus-operator/kube-prometheus) | 0.7.0             | ![kube-prometheus release](https://img.shields.io/github/v/release/prometheus-operator/kube-prometheus) |
-| log | [elasticsearch](https://github.com/elastic/elasticsearch) | 7.10.1            | ![elasticsearch release](https://img.shields.io/github/v/release/elastic/elasticsearch?sort=semver) |
-| storage | [rook](https://github.com/rook/rook) | 1.5.4 | ![rook release](https://img.shields.io/github/v/release/rook/rook?sort=semver) |
+| log | [elasticsearch](https://github.com/elastic/elasticsearch) | 7.10.2            | ![elasticsearch release](https://img.shields.io/github/v/release/elastic/elasticsearch?sort=semver) |
+| storage | [rook](https://github.com/rook/rook) | 1.5.5 | ![rook release](https://img.shields.io/github/v/release/rook/rook?sort=semver) |
 | storage | [longhorn](https://github.com/longhorn/longhorn) | 1.1.0 | ![longhorn release](https://img.shields.io/github/v/release/longhorn/longhorn?sort=semver) |
 | ui | [kubernetes_dashboard](https://github.com/kubernetes/dashboard) | 2.1.0            | ![kubernetes dashboard release](https://img.shields.io/github/v/release/kubernetes/dashboard?sort=semver) |
 | ui | [kubesphere](https://github.com/kubesphere/kubesphere) | 3.0.0            | ![kubesphere release](https://img.shields.io/github/v/release/kubesphere/kubesphere?sort=semver) |
