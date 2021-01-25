@@ -875,15 +875,6 @@ gpgcheck=1
 gpgkey=https://mirrors.aliyun.com/docker-ce/linux/centos/gpg
 EOF
 
-  command -V "docker" && yum remove -y docker \
-                docker-client \
-                docker-client-latest \
-                docker-common \
-                docker-latest \
-                docker-latest-logrotate \
-                docker-logrotate \
-                docker-engine
-
   yum install -y "docker-ce${version}" \
                  "docker-ce-cli${version}" \
                  containerd.io  \
