@@ -1634,7 +1634,7 @@ EOF
      sudo cp -f /etc/kubernetes/admin.conf \$HOME/.kube/config
   "
   check::exit_code "$?" "kubeadm init" "${MGMT_NODE}: set kube config"
-  if [[ "$(echo \"$MASTER_NODES\" | wc -w)" == "1" ]]; then
+  if [[ "$(echo "$MASTER_NODES" | wc -w)" == "1" ]]; then
     log::info "[kubeadm init]" "${MGMT_NODE}: delete master taint"
     command::exec "127.0.0.1" "kubectl taint nodes --all node-role.kubernetes.io/master-"
     check::exit_code "$?" "kubeadm init" "${MGMT_NODE}: delete master taint"
