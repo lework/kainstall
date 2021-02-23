@@ -69,16 +69,16 @@ MEM: `4G`
 | common | [docker-ce](https://github.com/docker/docker-ce) | latest             | ![docker-ce release](https://img.shields.io/github/v/release/docker/docker-ce?sort=semver) |
 | common | [kubernetes](https://github.com/kubernetes/kubernetes) | latest             | ![kubernetes release](https://img.shields.io/github/v/release/kubernetes/kubernetes?sort=semver) |
 | network | [flannel](https://github.com/coreos/flannel) | 0.13.0            | ![flannel release](https://img.shields.io/github/v/release/coreos/flannel) |
-| network | [calico](https://github.com/projectcalico/calico) | 3.17.1 | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
-| addons | [metrics server](https://github.com/kubernetes-sigs/metrics-server) | 0.4.1             | ![metrics-server release](https://img.shields.io/github/v/release/kubernetes-sigs/metrics-server) |
+| network | [calico](https://github.com/projectcalico/calico) | 3.18.0 | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
+| addons | [metrics server](https://github.com/kubernetes-sigs/metrics-server) | 0.4.2             | ![metrics-server release](https://img.shields.io/github/v/release/kubernetes-sigs/metrics-server) |
 | addons | [nodelocaldns](https://github.com/kubernetes/dns/tree/master/cmd/node-cache) | 1.16.0           | 1.16.0 |
-| ingress | [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.43.0            | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
-| ingress | [traefik](https://github.com/traefik/traefik) | 2.3.7            | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
+| ingress | [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.44.0          | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
+| ingress | [traefik](https://github.com/traefik/traefik) | 2.4.5          | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
 | monitor | [kube_prometheus](https://github.com/prometheus-operator/kube-prometheus) | 0.7.0             | ![kube-prometheus release](https://img.shields.io/github/v/release/prometheus-operator/kube-prometheus) |
-| log | [elasticsearch](https://github.com/elastic/elasticsearch) | 7.10.2            | ![elasticsearch release](https://img.shields.io/github/v/release/elastic/elasticsearch?sort=semver) |
-| storage | [rook](https://github.com/rook/rook) | 1.5.5 | ![rook release](https://img.shields.io/github/v/release/rook/rook?sort=semver) |
+| log | [elasticsearch](https://github.com/elastic/elasticsearch) | 7.11.1            | ![elasticsearch release](https://img.shields.io/github/v/release/elastic/elasticsearch?sort=semver) |
+| storage | [rook](https://github.com/rook/rook) | 1.5.7 | ![rook release](https://img.shields.io/github/v/release/rook/rook?sort=semver) |
 | storage | [longhorn](https://github.com/longhorn/longhorn) | 1.1.0 | ![longhorn release](https://img.shields.io/github/v/release/longhorn/longhorn?sort=semver) |
-| ui | [kubernetes_dashboard](https://github.com/kubernetes/dashboard) | 2.1.0            | ![kubernetes dashboard release](https://img.shields.io/github/v/release/kubernetes/dashboard?sort=semver) |
+| ui | [kubernetes_dashboard](https://github.com/kubernetes/dashboard) | 2.2.0            | ![kubernetes dashboard release](https://img.shields.io/github/v/release/kubernetes/dashboard?sort=semver) |
 | ui | [kubesphere](https://github.com/kubesphere/kubesphere) | 3.0.0            | ![kubesphere release](https://img.shields.io/github/v/release/kubesphere/kubesphere?sort=semver) |
 
 除 **kube组件** 版本可以通过参数(`--version`) 指定外，其他的软件版本需在脚本中指定。
@@ -142,7 +142,7 @@ Example:
   --worker 192.168.77.133,192.168.77.134,192.168.77.135 \
   --user root \
   --password 123456 \
-  --version 1.19.3
+  --version 1.20.4
 
   [reset cluster]
   kainstall.sh reset \
@@ -155,7 +155,7 @@ Example:
   --worker 192.168.77.143,192.168.77.144 \
   --user root \
   --password 123456 \
-  --version 1.19.3
+  --version 1.20.4
 
   [del node]
   kainstall.sh del \
@@ -166,7 +166,7 @@ Example:
 
   [other]
   kainstall.sh renew-cert --user root --password 123456
-  kainstall.sh upgrade --version 1.19.3 --user root --password 123456
+  kainstall.sh upgrade --version 1.20.4 --user root --password 123456
   kainstall.sh update
   kainstall.sh add --ingress traefik
   kainstall.sh add --monitor prometheus
@@ -186,7 +186,7 @@ bash kainstall.sh init \
   --user root \
   --password 123456 \
   --port 22 \
-  --version 1.20.1
+  --version 1.20.4
 
 # 使用环境变量
 export MASTER_NODES="192.168.77.130,192.168.77.131,192.168.77.132"
@@ -194,7 +194,7 @@ export WORKER_NODES="192.168.77.133,192.168.77.134"
 export SSH_USER="root"
 export SSH_PASSWORD="123456"
 export SSH_PORT="22"
-export KUBE_VERSION="1.20.1"
+export KUBE_VERSION="1.20.4"
 bash kainstall.sh init
 ```
 
@@ -210,7 +210,7 @@ bash -c "$(curl -sSL https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainsta
   --user root \
   --password 123456 \
   --port 22 \
-  --version 1.20.1
+  --version 1.20.4
 ```
 
 ### 增加节点
@@ -274,7 +274,7 @@ bash kainstall.sh add --storage rook
 bash kainstall.sh add --addon nodelocaldns
 
 # 升级版本
-bash kainstall.sh upgrade --version 1.20.1
+bash kainstall.sh upgrade --version 1.20.4
 
 # 重新颁发证书
 bash kainstall.sh renew-cert
@@ -295,16 +295,16 @@ bash kainstall.sh update
 DOCKER_VERSION="${DOCKER_VERSION:-latest}"
 KUBE_VERSION="${KUBE_VERSION:-latest}"
 FLANNEL_VERSION="${FLANNEL_VERSION:-0.13.0}"
-METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.4.1}"
-INGRESS_NGINX="${INGRESS_NGINX:-0.43.0}"
-TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.3.7}"
-CALICO_VERSION="${CALICO_VERSION:-3.17.1}"
+METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.4.2}"
+INGRESS_NGINX="${INGRESS_NGINX:-0.44.0}"
+TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.4.5}"
+CALICO_VERSION="${CALICO_VERSION:-3.18.0}"
 KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.7.0}"
-ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.10.2}"
-ROOK_VERSION="${ROOK_VERSION:-1.5.5}"
+ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.11.1}"
+ROOK_VERSION="${ROOK_VERSION:-1.5.7}"
 LONGHORN_VERSION="${LONGHORN_VERSION:-1.1.0}"
-KUBERNETES_DASHBOARD_VERSION="${KUBERNETES_DASHBOARD_VERSION:-2.1.0}"
-KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.0.0}"    
+KUBERNETES_DASHBOARD_VERSION="${KUBERNETES_DASHBOARD_VERSION:-2.2.0}"
+KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.0.0}" 
 
 # 集群配置
 KUBE_DNSDOMAIN="${KUBE_DNSDOMAIN:-cluster.local}"
@@ -352,7 +352,7 @@ SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
 1. 下载指定版本的离线包
 
     ```bash
-    wget http://kainstall.oss-cn-shanghai.aliyuncs.com/1.20.1/centos7.tgz
+    wget http://kainstall.oss-cn-shanghai.aliyuncs.com/1.20.4/centos7.tgz
     ```
 
     > 更多离线包信息，见 [kainstall-offline](https://github.com/lework/kainstall-offline) 仓库
@@ -365,7 +365,11 @@ SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
     bash kainstall.sh init \
       --master 192.168.77.130,192.168.77.131,192.168.77.132 \
       --worker 192.168.77.133,192.168.77.134 \
-      --version 1.20.1 \
+      --user root \
+      --password 123456 \
+      --version 1.20.4 \
+      --upgrade-kernel \
+      --10years \
       --offline-file centos7.tgz
     ```
 
@@ -377,7 +381,9 @@ SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
     bash kainstall.sh add \
       --master 192.168.77.135 \
       --worker 192.168.77.136 \
-      --version 1.20.1 \
+      --user root \
+      --password 123456 \
+      --version 1.20.4 \
       --offline-file centos7.tgz
     ```
 
@@ -407,7 +413,7 @@ bash kainstall.sh init \
   --user test \
   --password 12345678 \
   --port 22 \
-  --version 1.20.1 \
+  --version 1.20.4 \
   --sudo \
   --sudo-user root \
   --sudo-password 12345678
@@ -419,7 +425,7 @@ bash kainstall.sh add \
   --user test \
   --password 12345678 \
   --port 22 \
-  --version 1.20.1 \
+  --version 1.20.4 \
   --sudo \
   --sudo-user root \
   --sudo-password 12345678
@@ -446,7 +452,7 @@ bash kainstall.sh init \
   --user root \
   --password 123456 \
   --port 22 \
-  --version 1.20.1 \
+  --version 1.20.4 \
   --10years
   
 # 添加
@@ -456,7 +462,7 @@ bash kainstall.sh add \
   --user root \
   --password 123456 \
   --port 22 \
-  --version 1.20.1 \
+  --version 1.20.4 \
   --10years
 ```
 

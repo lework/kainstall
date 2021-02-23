@@ -22,15 +22,15 @@ set -o pipefail         # Use last non-zero exit code in a pipeline
 DOCKER_VERSION="${DOCKER_VERSION:-latest}"
 KUBE_VERSION="${KUBE_VERSION:-latest}"
 FLANNEL_VERSION="${FLANNEL_VERSION:-0.13.0}"
-METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.4.1}"
-INGRESS_NGINX="${INGRESS_NGINX:-0.43.0}"
-TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.3.7}"
-CALICO_VERSION="${CALICO_VERSION:-3.17.1}"
+METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.4.2}"
+INGRESS_NGINX="${INGRESS_NGINX:-0.44.0}"
+TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.4.5}"
+CALICO_VERSION="${CALICO_VERSION:-3.18.0}"
 KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.7.0}"
-ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.10.2}"
-ROOK_VERSION="${ROOK_VERSION:-1.5.5}"
+ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.11.1}"
+ROOK_VERSION="${ROOK_VERSION:-1.5.7}"
 LONGHORN_VERSION="${LONGHORN_VERSION:-1.1.0}"
-KUBERNETES_DASHBOARD_VERSION="${KUBERNETES_DASHBOARD_VERSION:-2.1.0}"
+KUBERNETES_DASHBOARD_VERSION="${KUBERNETES_DASHBOARD_VERSION:-2.2.0}"
 KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.0.0}"
 
 # 集群配置
@@ -100,8 +100,8 @@ function trap::info() {
 function log::err() {
   # 错误日志
   
-  local item; item="[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[31mERROR:   \033[0m$*\n"
-  ERROR_INFO="${ERROR_INFO}${item}  "
+  local item; item="[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[31mERROR:   \033[0m$*"
+  ERROR_INFO="${ERROR_INFO}${item}\n  "
   echo -e "${item}" | tee -a "$LOG_FILE"
 }
 
@@ -1869,6 +1869,7 @@ function add::ingress() {
     kube::apply "${ingress_nginx_file}"
     
     kube::wait "ingress-nginx" "ingress-nginx" "pod" "app.kubernetes.io/component=controller" && add_ingress_demo=1
+    sleep 10
 
   elif [[ "$KUBE_INGRESS" == "traefik" ]]; then
     log::info "[ingress]" "add ingress-traefik"
@@ -2107,7 +2108,7 @@ spec:
     spec:
       containers:
       - name: whoami
-        image: traefik/whoami:v1.6.0
+        image: traefik/whoami:v1.6.1
         ports:
         - containerPort: 80
 ---
@@ -2242,11 +2243,12 @@ function add::monitor() {
     command::exec "${MGMT_NODE}" "
       $(declare -f utils::retry)
       cd \"${OFFLINE_DIR}/manifests/kube-prometheus-${KUBE_PROMETHEUS_VERSION}\" \
-      && utils::retry 6 kubectl apply -f manifests/setup/ \
+      && utils::retry 6 kubectl apply --wait=true --timeout=10s -f manifests/setup/ \
       && until kubectl get servicemonitors --all-namespaces ; do date; sleep 1; echo ''; done \
-      && utils::retry 6 kubectl apply -f manifests/
+      && utils::retry 6 kubectl apply --wait=true --timeout=10s -f manifests/
     "
     check::exit_code "$?" "apply" "add prometheus"
+    kube::wait "prometheus" "monitoring" "pods --all"
 
     kube::apply "controller-manager and scheduler prometheus discovery service" "
 ---
@@ -2624,6 +2626,7 @@ spec:
     " 
     # shellcheck disable=SC2181
     if [[ "$?" == "0" ]]; then
+      kube::wait "elasticsearch" "kube-logging" "pods --all"
       get::ingress_conn
       log::access "[ingress]" "curl -H 'Host:kibana.logging.cluster.local' http://${INGRESS_CONN}"
       log::access "[ingress]" "curl -H 'Host:elasticsearch.logging.cluster.local' http://${INGRESS_CONN}"
@@ -3330,7 +3333,7 @@ Example:
   --worker 192.168.77.133,192.168.77.134,192.168.77.135 \\
   --user root \\
   --password 123456 \\
-  --version 1.19.3
+  --version 1.20.4
 
   [reset cluster]
   $0 reset \\
@@ -3343,7 +3346,7 @@ Example:
   --worker 192.168.77.143,192.168.77.144 \\
   --user root \\
   --password 123456 \\
-  --version 1.19.3
+  --version 1.20.4
 
   [del node]
   $0 del \\
@@ -3354,7 +3357,7 @@ Example:
  
   [other]
   $0 renew-cert --user root --password 123456
-  $0 upgrade --version 1.19.3 --user root --password 123456
+  $0 upgrade --version 1.20.4 --user root --password 123456
   $0 update
   $0 add --ingress traefik
   $0 add --monitor prometheus
