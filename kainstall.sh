@@ -38,7 +38,7 @@ KUBE_DNSDOMAIN="${KUBE_DNSDOMAIN:-cluster.local}"
 KUBE_APISERVER="${KUBE_APISERVER:-apiserver.$KUBE_DNSDOMAIN}"
 KUBE_POD_SUBNET="${KUBE_POD_SUBNET:-10.244.0.0/16}"
 KUBE_SERVICE_SUBNET="${KUBE_SERVICE_SUBNET:-10.96.0.0/16}"
-KUBE_IMAGE_REPO="${KUBE_IMAGE_REPO:-registry.aliyuncs.com/k8sxio}"
+KUBE_IMAGE_REPO="${KUBE_IMAGE_REPO:-registry.cn-hangzhou.aliyuncs.com/kainstall}"
 KUBE_NETWORK="${KUBE_NETWORK:-flannel}"
 KUBE_INGRESS="${KUBE_INGRESS:-nginx}"
 KUBE_MONITOR="${KUBE_MONITOR:-prometheus}"
@@ -803,6 +803,8 @@ EOF
      systemctl stop auditd && systemctl start auditd
   fi
   systemctl enable auditd
+
+  grep single-request-reopen /etc/resolv.conf || sed -i '1ioptions timeout:2 attempts:3 rotate single-request-reopen' /etc/resolv.conf
 }
 
 
@@ -975,9 +977,8 @@ function script::install_haproxy() {
    [ ! -f /etc/haproxy/haproxy.cfg_bak ] && cp /etc/haproxy/haproxy.cfg{,_bak}
 cat << EOF > /etc/haproxy/haproxy.cfg
 global
-  log 127.0.0.1 local0
-  log 127.0.0.1 local1 notice
-  log /dev/log local0 info
+  log /dev/log    local0
+  log /dev/log    local1 notice
   tune.ssl.default-dh-param 2048
 
 defaults
@@ -998,6 +999,7 @@ listen stats
 
 frontend kube-apiserver-https
    mode tcp
+   option tcplog
    bind :6443
    default_backend kube-apiserver-backend
 
@@ -1515,7 +1517,7 @@ ipvs:
 ---
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
-maxPods: 1000
+maxPods: 200
 # 此配置保证了 kubelet 能在 swap 开启的情况下启动
 failSwapOn: false
 nodeStatusUpdateFrequency: 5s
@@ -1597,6 +1599,7 @@ $(for h in $MASTER_NODES;do echo "  - $h";done)
 controllerManager:
   extraArgs:
     bind-address: 0.0.0.0
+    node-cidr-mask-size: '24'
     deployment-controller-sync-period: '10s'
     node-monitor-grace-period: '20s'
     pod-eviction-timeout: '2m'
@@ -1862,14 +1865,16 @@ function add::ingress() {
     local ingress_nginx_file="${OFFLINE_DIR}/manifests/ingress-nginx.yml"
     utils::download_file "https://cdn.jsdelivr.net/gh/kubernetes/ingress-nginx@controller-v${INGRESS_NGINX}/deploy/static/provider/baremetal/deploy.yaml" "${ingress_nginx_file}"
     command::exec "${MGMT_NODE}" "
-      sed -i -e 's#k8s.gcr.io#${GCR_PROXY}#g' \
+      sed -i -e 's#k8s.gcr.io/ingress-nginx#${KUBE_IMAGE_REPO}#g' \
              -e 's#@sha256:.*\$##g' '${ingress_nginx_file}'
     "
     check::exit_code "$?" "ingress" "change ingress-nginx manifests"
     kube::apply "${ingress_nginx_file}"
-    
+
     kube::wait "ingress-nginx" "ingress-nginx" "pod" "app.kubernetes.io/component=controller" && add_ingress_demo=1
-    sleep 10
+
+    command::exec "${MGMT_NODE}" "kubectl delete -A ValidatingWebhookConfiguration ingress-nginx-admission"
+    check::exit_code "$?" "ingress" "delete ingress-ngin ValidatingWebhookConfiguration"
 
   elif [[ "$KUBE_INGRESS" == "traefik" ]]; then
     log::info "[ingress]" "add ingress-traefik"
@@ -2031,7 +2036,6 @@ spec:
   fi
 
   if [[ "x$add_ingress_demo" == "x1" ]]; then
-    sleep 3
     log::info "[ingress]" "add ingress default-http-backend"
     kube::apply "default-http-backend" """
 ---
@@ -2199,12 +2203,12 @@ function add::addon() {
   if [[ "$KUBE_ADDON" == "metrics-server" ]]; then
     log::info "[addon]" "download metrics-server manifests"
     local metrics_server_file="${OFFLINE_DIR}/manifests/metrics-server.yml"
-    utils::download_file "https://github.com/kubernetes-sigs/metrics-server/releases/download/v${METRICS_SERVER_VERSION}/components.yaml" "${metrics_server_file}"
+    utils::download_file "${GITHUB_PROXY}/https://github.com/kubernetes-sigs/metrics-server/releases/download/v${METRICS_SERVER_VERSION}/components.yaml" "${metrics_server_file}"
   
     command::exec "${MGMT_NODE}" "
       sed -i -e 's#k8s.gcr.io/metrics-server#$KUBE_IMAGE_REPO#g' \
              -e '/--kubelet-preferred-address-types=.*/d' \
-             -e 's/\\(.*\\)- --secure-port=4443/\\1- --secure-port=4443\\n\\1- --kubelet-insecure-tls\\n\\1- --kubelet-preferred-address-types=InternalDNS,InternalIP,ExternalDNS,ExternalIP,Hostname/g' \
+             -e 's/\\(.*\\)- --secure-port=4443/\\1- --secure-port=4443\\n\\1- --kubelet-insecure-tls\\n\\1- --kubelet-preferred-address-types=InternalIP,InternalDNS,ExternalIP,ExternalDNS,Hostname/g' \
              \"${metrics_server_file}\"
     "
     check::exit_code "$?" "addon" "change metrics-server parameter"
@@ -2425,7 +2429,7 @@ spec:
               fieldRef:
                 fieldPath: metadata.name
           - name: discovery.seed_hosts
-            value: 'es-cluster-0,es-cluster-1,es-cluster-2'
+            value: 'es-cluster-0.elasticsearch,es-cluster-1.elasticsearch,es-cluster-2.elasticsearch'
           - name: cluster.initial_master_nodes
             value: 'es-cluster-0,es-cluster-1,es-cluster-2'
           - name: ES_JAVA_OPTS
@@ -2935,7 +2939,8 @@ spec:
             hostPath:
               path: /lib64
 """
-  [[ "$?" == "" ]] && log::access "[ops]" "etcd backup directory: /var/lib/etcd/backups"
+  # shellcheck disable=SC2181
+  [[ "$?" == "0" ]] && log::access "[ops]" "etcd backup directory: /var/lib/etcd/backups"
   command::exec "${MGMT_NODE}" "
     jobname=\"etcd-snapshot-$(date +%s)\"
     kubectl create job --from=cronjob/etcd-snapshot \${jobname} -n kube-system && \
