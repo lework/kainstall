@@ -69,14 +69,14 @@ MEM: `4G`
 | common | [docker-ce](https://github.com/docker/docker-ce) | latest             | ![docker-ce release](https://img.shields.io/github/v/release/docker/docker-ce?sort=semver) |
 | common | [kubernetes](https://github.com/kubernetes/kubernetes) | latest             | ![kubernetes release](https://img.shields.io/github/v/release/kubernetes/kubernetes?sort=semver) |
 | network | [flannel](https://github.com/coreos/flannel) | 0.13.0            | ![flannel release](https://img.shields.io/github/v/release/coreos/flannel) |
-| network | [calico](https://github.com/projectcalico/calico) | 3.18.0 | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
+| network | [calico](https://github.com/projectcalico/calico) | 3.18.1 | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
 | addons | [metrics server](https://github.com/kubernetes-sigs/metrics-server) | 0.4.2             | ![metrics-server release](https://img.shields.io/github/v/release/kubernetes-sigs/metrics-server) |
 | addons | [nodelocaldns](https://github.com/kubernetes/dns/tree/master/cmd/node-cache) | 1.16.0           | 1.16.0 |
 | ingress | [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.44.0          | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
-| ingress | [traefik](https://github.com/traefik/traefik) | 2.4.5          | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
+| ingress | [traefik](https://github.com/traefik/traefik) | 2.4.7          | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
 | monitor | [kube_prometheus](https://github.com/prometheus-operator/kube-prometheus) | 0.7.0             | ![kube-prometheus release](https://img.shields.io/github/v/release/prometheus-operator/kube-prometheus) |
-| log | [elasticsearch](https://github.com/elastic/elasticsearch) | 7.11.1            | ![elasticsearch release](https://img.shields.io/github/v/release/elastic/elasticsearch?sort=semver) |
-| storage | [rook](https://github.com/rook/rook) | 1.5.7 | ![rook release](https://img.shields.io/github/v/release/rook/rook?sort=semver) |
+| log | [elasticsearch](https://github.com/elastic/elasticsearch) | 7.11.2            | ![elasticsearch release](https://img.shields.io/github/v/release/elastic/elasticsearch?sort=semver) |
+| storage | [rook](https://github.com/rook/rook) | 1.5.9 | ![rook release](https://img.shields.io/github/v/release/rook/rook?sort=semver) |
 | storage | [longhorn](https://github.com/longhorn/longhorn) | 1.1.0 | ![longhorn release](https://img.shields.io/github/v/release/longhorn/longhorn?sort=semver) |
 | ui | [kubernetes_dashboard](https://github.com/kubernetes/dashboard) | 2.2.0            | ![kubernetes dashboard release](https://img.shields.io/github/v/release/kubernetes/dashboard?sort=semver) |
 | ui | [kubesphere](https://github.com/kubesphere/kubesphere) | 3.0.0            | ![kubesphere release](https://img.shields.io/github/v/release/kubesphere/kubesphere?sort=semver) |
