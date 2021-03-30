@@ -34,7 +34,6 @@ MEM: `4G`
   - 关闭 `selinux`
   - 关闭 `swap`
   - 关闭 `firewalld`
-  - 关闭大内存页
   - 配置 `epel` 源
   - 修改 `limits`
   - 配置内核参数
@@ -54,6 +53,7 @@ MEM: `4G`
 - 安装`storage`组件，可选`rook`，`longhorn`。
 - 安装`web ui`组件，可选`dashboard`, `kubesphere`。
 - 安装`addon`组件，可选`metrics-server`, `nodelocaldns`。
+- 安装`cri`组件，可选`docker`, `containerd`, `cri-o`
 - 升级到`kubernetes`指定版本。
 - 更新集群证书。
 - 添加运维操作，如备份etcd快照。
@@ -128,6 +128,9 @@ Flag:
   -M,--monitor         cluster monitor, choose: [prometheus]
   -l,--log             cluster log, choose: [elasticsearch]
   -s,--storage         cluster storage, choose: [rook,longhorn]
+     --cri             cri runtime, choose: [docker,containerd,cri-o], default: docker
+     --cri-version     cri version, default: latest
+     --cri-endpoint    cri endpoint, default: /var/run/dockershim.sock
   -U,--upgrade-kernel  upgrade kernel
   -of,--offline-file   specify the offline package file to load
       --10years        the certificate period is 10 years.
@@ -163,7 +166,7 @@ Example:
   --worker 192.168.77.143,192.168.77.144 \
   --user root \
   --password 123456
-
+ 
   [other]
   kainstall.sh renew-cert --user root --password 123456
   kainstall.sh upgrade --version 1.20.4 --user root --password 123456
@@ -284,6 +287,22 @@ DEBUG=1 bash kainstall.sh
 
 # 更新脚本
 bash kainstall.sh update
+
+# 使用 cri-o containerd runtime
+bash kainstall.sh init \
+  --master 192.168.77.130,192.168.77.131,192.168.77.132 \
+  --worker 192.168.77.133,192.168.77.134,192.168.77.135 \
+  --user root \
+  --password 123456 \
+  --cri containerd
+  
+# 使用 cri-o cri runtime
+bash kainstall.sh init \
+  --master 192.168.77.130,192.168.77.131,192.168.77.132 \
+  --worker 192.168.77.133,192.168.77.134,192.168.77.135 \
+  --user root \
+  --password 123456 \
+  --cri cri-o
 ```
 
 ### 默认设置
@@ -292,7 +311,6 @@ bash kainstall.sh update
 
 ```bash
 # 版本
-DOCKER_VERSION="${DOCKER_VERSION:-latest}"
 KUBE_VERSION="${KUBE_VERSION:-latest}"
 FLANNEL_VERSION="${FLANNEL_VERSION:-0.13.0}"
 METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.4.2}"
@@ -320,6 +338,9 @@ KUBE_LOG="${KUBE_LOG:-elasticsearch}"
 KUBE_UI="${KUBE_UI:-dashboard}"
 KUBE_ADDON="${KUBE_ADDON:-metrics-server}"
 KUBE_FLANNEL_TYPE="${KUBE_FLANNEL_TYPE:-vxlan}"
+KUBE_CRI="${KUBE_CRI:-docker}"
+KUBE_CRI_VERSION="${KUBE_CRI_VERSION:-latest}"
+KUBE_CRI_ENDPOINT="${KUBE_CRI_ENDPOINT:-/var/run/dockershim.sock}"
 
 # 定义的master和worker节点地址，以逗号分隔
 MASTER_NODES="${MASTER_NODES:-}"

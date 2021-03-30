@@ -19,7 +19,6 @@ set -o pipefail         # Use last non-zero exit code in a pipeline
 ######################################################################################################
 
 # 版本
-DOCKER_VERSION="${DOCKER_VERSION:-latest}"
 KUBE_VERSION="${KUBE_VERSION:-latest}"
 FLANNEL_VERSION="${FLANNEL_VERSION:-0.13.0}"
 METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.4.2}"
@@ -47,6 +46,9 @@ KUBE_LOG="${KUBE_LOG:-elasticsearch}"
 KUBE_UI="${KUBE_UI:-dashboard}"
 KUBE_ADDON="${KUBE_ADDON:-metrics-server}"
 KUBE_FLANNEL_TYPE="${KUBE_FLANNEL_TYPE:-vxlan}"
+KUBE_CRI="${KUBE_CRI:-docker}"
+KUBE_CRI_VERSION="${KUBE_CRI_VERSION:-latest}"
+KUBE_CRI_ENDPOINT="${KUBE_CRI_ENDPOINT:-/var/run/dockershim.sock}"
 
 # 定义的master和worker节点地址，以逗号分隔
 MASTER_NODES="${MASTER_NODES:-}"
@@ -97,7 +99,7 @@ function trap::info() {
 }
 
 
-function log::err() {
+function log::error() {
   # 错误日志
   
   local item; item="[$(date +'%Y-%m-%dT%H:%M:%S.%N%z')]: \033[31mERROR:   \033[0m$*"
@@ -167,6 +169,7 @@ function utils::retry {
 
 function utils::quote() {
   # 转义引号
+
   # shellcheck disable=SC2046 
   if [ $(echo "$*" | tr -d "\n" | wc -c) -eq 0 ]; then
     echo "''"
@@ -208,6 +211,23 @@ function utils::download_file() {
 }
 
 
+function utils::is_element_in_array() {
+  # 判断是否在数组中存在元素
+
+  local -r element="${1}"
+  local -r array=("${@:2}")
+
+  local walker=''
+
+  for walker in "${array[@]}"
+  do
+      [[ "${walker}" = "${element}" ]] && return 0
+  done
+
+  return 1
+}
+
+
 function command::exec() {
   # 执行命令
 
@@ -238,7 +258,7 @@ function command::exec() {
     if [[ "${SSH_PASSWORD}" != "" ]]; then
       ssh_cmd="sshpass -p \"${SSH_PASSWORD}\" ${ssh_cmd}"
     elif [[ "$SSH_PRIVATE_KEY" != "" ]]; then
-      [ -f "${SSH_PRIVATE_KEY}" ] || { log::err "[exec]" "ssh private_key:${SSH_PRIVATE_KEY} not found."; exit 1; }
+      [ -f "${SSH_PRIVATE_KEY}" ] || { log::error "[exec]" "ssh private_key:${SSH_PRIVATE_KEY} not found."; exit 1; }
       ssh_cmd="${ssh_cmd} -i $SSH_PRIVATE_KEY"
     fi
     log::exec "[command]" "${ssh_cmd//${SSH_PASSWORD:-}/zzzzzz} ${SSH_OPTIONS} ${SSH_USER}@${host} -p ${SSH_PORT} bash -c $(printf "%s" "${command//${SUDO_PASSWORD:-}/zzzzzz}")"
@@ -268,7 +288,7 @@ function command::scp() {
     if [[ "${SSH_PASSWORD}" != "" ]]; then
       scp_cmd="sshpass -p \"${SSH_PASSWORD}\" ${scp_cmd}"
     elif [[ "$SSH_PRIVATE_KEY" != "" ]]; then
-      [ -f "${SSH_PRIVATE_KEY}" ] || { log::err "[exec]" "ssh private_key:${SSH_PRIVATE_KEY} not found."; exit 1; }
+      [ -f "${SSH_PRIVATE_KEY}" ] || { log::error "[exec]" "ssh private_key:${SSH_PRIVATE_KEY} not found."; exit 1; }
       scp_cmd="${scp_cmd} -i $SSH_PRIVATE_KEY"
     fi
     log::exec "[command]" "${scp_cmd} ${SSH_OPTIONS} -P ${SSH_PORT} -r ${src} ${SSH_USER}@${host}:${dest}" >> "$LOG_FILE"
@@ -590,18 +610,6 @@ PS1='\[\033[0m\]\[\033[1;36m\][\u\[\033[0m\]@\[\033[1;32m\]\h\[\033[0m\] \[\033[
 ## Kainstall managed end
 EOF
 
-   # Disable Transparent Hugepages
-   if test -f /sys/kernel/mm/transparent_hugepage/enabled; then echo never > /sys/kernel/mm/transparent_hugepage/enabled;fi
-   if test -f /sys/kernel/mm/transparent_hugepage/defrag; then echo never > /sys/kernel/mm/transparent_hugepage/defrag;fi
-   cat << EOF >> /etc/rc.local
-## Kainstall managed start
-# Disable Transparent Hugepages
-if test -f /sys/kernel/mm/transparent_hugepage/enabled; then echo never > /sys/kernel/mm/transparent_hugepage/enabled;fi
-if test -f /sys/kernel/mm/transparent_hugepage/defrag; then echo never > /sys/kernel/mm/transparent_hugepage/defrag;fi
-## Kainstall managed end
-EOF
-   chmod +x /etc/rc.local
-
    # journal
    mkdir -p /var/log/journal /etc/systemd/journald.conf.d
    cat << EOF > /etc/systemd/journald.conf.d/99-prophet.conf
@@ -632,6 +640,7 @@ EOF
 # @Desc    : ssh login banner
 
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+shopt -q login_shell && : || return 0
 echo -e "\033[0;32m
  ██╗  ██╗ █████╗ ███████╗
  ██║ ██╔╝██╔══██╗██╔════╝
@@ -704,8 +713,8 @@ MEM_INFO="\$(cat /proc/meminfo | awk '/MemTotal:/{total=\$2/1024/1024;next} /Mem
 # extranet_ip=" and \$(curl -s ip.cip.cc)"
 IP_INFO="\$(ip a | grep glo | awk '{print \$2}' | head -1 | cut -f1 -d/)\${extranet_ip:-}"
 
-# docker info
-DOCKER_INFO="\$(sudo /usr/bin/docker info 2> /dev/null | awk '/Running:/{run=\$1\$2; next} /Paused:/{pause=\$1\$2;next} /Stopped:/{stop=\$1\$2;next} /Images:/{image=\$1\$2;printf("\033[0;33m%s\033[0m  %s  \033[0;33m%s\033[0m  %s" ,run, pause, stop, image)}')"
+# Container info
+CONTAINER_INFO="\$(sudo /usr/bin/crictl ps -a -o yaml 2> /dev/null | awk '/^  state: /{gsub("CONTAINER_", "", \$NF) ++S[\$NF]}END{for(m in S) printf "%s%s:%s ",substr(m,1,1),tolower(substr(m,2)),S[m]}')Images:\$(sudo /usr/bin/crictl images -q 2> /dev/null | wc -l)"
 
 # info
 echo -e "
@@ -726,18 +735,18 @@ echo -e "
 
  \033[0;1;31mUsers online\033[0m.......: \033[1;34m\${USER_NUM}\033[0m
  \033[0;1;31mRunning Processes\033[0m..: \033[1;34m\${RUNNING}\033[0m
- \033[0;1;31mDocker Info\033[0m........: \${DOCKER_INFO}
+ \033[0;1;31mContainer Info\033[0m.....: \${CONTAINER_INFO}
 "
 EOF
 
   chmod +x /etc/profile.d/zz-ssh-login-info.sh
-  echo 'ALL ALL=NOPASSWD: /usr/bin/docker info' > /etc/sudoers.d/docker
+  echo 'ALL ALL=NOPASSWD: /usr/bin/crictl info' > /etc/sudoers.d/crictl
 
   # time sync
   yum install -y chrony 
   [ ! -f /etc/chrony.conf_bak ] && cp /etc/chrony.conf{,_bak} #备份默认配置
   cat << EOF > /etc/chrony.conf
-server ntp6.aliyun.com iburst
+server ntp.aliyun.com iburst
 server cn.ntp.org.cn iburst
 server ntp.shu.edu.cn iburst
 server 0.cn.pool.ntp.org iburst
@@ -763,6 +772,7 @@ EOF
   ip_vs_rr
   ip_vs_wrr
   ip_vs_sh
+  overlay
   nf_conntrack
   br_netfilter
   )
@@ -786,13 +796,26 @@ cat << EOF >> /etc/audit/rules.d/audit.rules
 -w /etc/default/docker -k docker
 -w /etc/sysconfig/docker -k docker
 -w /etc/docker/daemon.json -k docker
--w /usr/bin/containerd -k docker
--w /usr/sbin/runc -k docker
+
+# containerd
+-w /usr/bin/containerd -k containerd
+-w /var/lib/containerd -k containerd
+-w /usr/lib/systemd/system/containerd.service -k containerd
+-w /etc/containerd/config.toml -k containerd
+
+# cri-o
+-w /usr/bin/crio -k cri-o
+-w /etc/crio -k cri-o
+
+# runc 
+-w /usr/bin/runc -k runc
 
 # kube
 -w /usr/bin/kubeadm -k kubeadm
 -w /usr/bin/kubelet -k kubelet
 -w /usr/bin/kubectl -k kubectl
+-w /var/lib/kubelet -k kubelet
+-w /etc/kubernetes -k kubernetes
 ## Kainstall managed end
 EOF
   chmod 600 /etc/audit/rules.d/audit.rules
@@ -805,6 +828,9 @@ EOF
   systemctl enable auditd
 
   grep single-request-reopen /etc/resolv.conf || sed -i '1ioptions timeout:2 attempts:3 rotate single-request-reopen' /etc/resolv.conf
+
+  ipvsadm --clear
+  iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X
 }
 
 
@@ -863,7 +889,7 @@ function script::upgrage_kube() {
 
 
 function script::install_docker() {
-  # 安装docker
+  # 安装 docker
   
   local version="-${1:-latest}"
   version="${version#-latest}"
@@ -877,11 +903,12 @@ gpgcheck=1
 gpgkey=https://mirrors.aliyun.com/docker-ce/linux/centos/gpg
 EOF
 
-  yum install -y "docker-ce${version}" \
-                 "docker-ce-cli${version}" \
-                 containerd.io  \
-                 bash-completion
-  
+  if [[ "${OFFLINE_TAG:-}" != "1" ]];then
+    [ -f /usr/bin/docker ]  && yum remove -y docker-ce docker-ce-cli containerd.io
+
+    yum install -y "docker-ce${version}" "docker-ce-cli${version}" containerd.io bash-completion
+  fi
+
   [ -f /usr/share/bash-completion/completions/docker ] && \
     cp -f /usr/share/bash-completion/completions/docker /etc/bash_completion.d/
 
@@ -914,16 +941,145 @@ EOF
   "storage-opts": ["overlay2.override_kernel_check=true"],
   "exec-opts": ["native.cgroupdriver=systemd"],
   "registry-mirrors": [
-    "https://yssx4sxy.mirror.aliyuncs.com/",
-    "https://hub-mirror.c.163.com/"
+    "https://yssx4sxy.mirror.aliyuncs.com/"
   ]
 }
 EOF
   sed -i 's|#oom_score = 0|oom_score = -999|' /etc/containerd/config.toml
+  cat << EOF > /etc/crictl.yaml
+runtime-endpoint: unix:///var/run/dockershim.sock
+image-endpoint: unix:///var/run/dockershim.sock
+timeout: 2
+debug: false
+pull-image-on-create: true
+disable-pull-on-run: false
+EOF
+  
+  systemctl enable containerd
   systemctl restart containerd
 
   systemctl enable docker
   systemctl restart docker
+}
+
+
+function script::install_containerd() {
+  # 安装 containerd
+  
+  local version="-${1:-latest}"
+  version="${version#-latest}"
+
+  cat << EOF > /etc/yum.repos.d/docker-ce.repo
+[docker-ce-stable]
+name=Docker CE Stable - \$basearch
+baseurl=https://mirrors.aliyun.com/docker-ce/linux/centos/$(rpm --eval '%{centos_ver}')/\$basearch/stable
+enabled=1
+gpgcheck=1
+gpgkey=https://mirrors.aliyun.com/docker-ce/linux/centos/gpg
+EOF
+
+  if [[ "${OFFLINE_TAG:-}" != "1" ]];then
+    [ -f /usr/bin/runc ]  && yum remove -y runc
+    [ -f /usr/bin/containerd ]  && yum remove -y containerd.io
+    yum install -y containerd.io"${version}" containernetworking bash-completion
+  fi
+
+  [ -d /etc/bash_completion.d ] && crictl completion bash > /etc/bash_completion.d/crictl
+
+  containerd config default > /etc/containerd/config.toml
+  sed -i -e "s#k8s.gcr.io#registry.cn-hangzhou.aliyuncs.com/kainstall#g" \
+         -e "/containerd.runtimes.runc.options/a\ \ \ \ \ \ \ \ \ \ \ \ SystemdCgroup = true" \
+         -e "s#https://registry-1.docker.io#https://yssx4sxy.mirror.aliyuncs.com#g" \
+         -e "s#oom_score = 0#oom_score = -999#" \
+         -e "s#max_concurrent_downloads = 3#max_concurrent_downloads = 10#g" /etc/containerd/config.toml
+
+  cat << EOF > /etc/crictl.yaml
+runtime-endpoint: unix:///run/containerd/containerd.sock
+image-endpoint: unix:///run/containerd/containerd.sock
+timeout: 2
+debug: false
+pull-image-on-create: true
+disable-pull-on-run: false
+EOF
+  
+  systemctl restart containerd
+  systemctl enable containerd
+  
+}
+
+function script::install_cri-o() {
+  # 安装 cri-o
+  
+  local version="${1:-latest}"
+  version="${version##latest}"
+  os="CentOS_$(rpm --eval '%{centos_ver}')" && echo "${os}"
+
+  cat << EOF > /etc/yum.repos.d/devel_kubic_libcontainers_stable.repo
+[devel_kubic_libcontainers_stable]
+name=Stable Releases of Upstream github.com/containers packages
+type=rpm-md
+baseurl=https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/${os}/
+gpgcheck=1
+gpgkey=https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/${os}/repodata/repomd.xml.key
+enabled=1
+
+[devel_kubic_libcontainers_stable_cri-o]
+name=devel:kubic:libcontainers:stable:cri-o
+type=rpm-md
+baseurl=https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/${version}/${os}/
+gpgcheck=1
+gpgkey=https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/${version}/${os}/repodata/repomd.xml.key
+enabled=1
+EOF
+
+  if [[ "${OFFLINE_TAG:-}" != "1" ]];then
+    [ -f /usr/bin/runc ]  && yum remove -y runc
+    [ -f /usr/bin/crio ]  && yum remove -y cri-o
+    [ -f /usr/bin/docker ]  && yum remove -y docker-ce docker-ce-cli containerd.io
+
+    yum install -y runc cri-o bash-completion --disablerepo=docker-ce-stable
+  fi
+
+  [ -d /etc/bash_completion.d ] && \
+    { crictl completion bash >  /etc/bash_completion.d/crictl; \
+      crio completion bash > /etc/bash_completion.d/crio; \
+      crio-status completion bash > /etc/bash_completion.d/crio-status; }
+
+  sed -i -e "s#k8s.gcr.io#registry.cn-hangzhou.aliyuncs.com/kainstall#g" \
+         -e 's|#registries = \[|registries = ["docker.io", "quay.io"]|g' /etc/crio/crio.conf
+
+  [ -d /etc/containers/registries.conf.d ] && cat << EOF > /etc/containers/registries.conf.d/000-dockerio.conf
+[[registry]]
+prefix = "docker.io"
+insecure = false
+blocked = false
+location = "docker.io"
+
+[[registry.mirror]]
+location = "yssx4sxy.mirror.aliyuncs.com"
+insecure = true
+EOF
+
+  cat << EOF > /etc/crictl.yaml
+runtime-endpoint: unix:///var/run/crio/crio.sock
+image-endpoint: unix:///var/run/crio/crio.sock
+timeout: 2
+debug: false
+pull-image-on-create: true
+disable-pull-on-run: false
+EOF
+
+  sed -i "s#10.85.0.0/16#${KUBE_POD_SUBNET:-10.85.0.0/16}#g" /etc/cni/net.d/100-crio-bridge.conf
+  cat << EOF > /etc/cni/net.d/10-crio.conf
+{
+$(grep cniVersion /etc/cni/net.d/100-crio-bridge.conf)
+    "name": "crio",
+    "type": "flannel"
+}
+EOF
+  mv /etc/cni/net.d/100-crio-bridge.conf /etc/cni/net.d/10-crio.conf /etc/cni/net.d/200-loopback.conf /tmp/
+  systemctl restart crio
+  systemctl enable crio
 }
 
 
@@ -943,10 +1099,13 @@ repo_gpgcheck=1
 gpgkey=https://mirrors.aliyun.com/kubernetes/yum/doc/yum-key.gpg https://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg
 EOF
 
-  yum install -y "kubeadm${version}" \
-                 "kubelet${version}" \
-                 "kubectl${version}" \
-                 --disableexcludes=kubernetes
+  if [[ "${OFFLINE_TAG:-}" != "1" ]];then
+    [ -f /usr/bin/kubeadm ]  && yum remove -y kubeadm
+    [ -f /usr/bin/kubelet ]  && yum remove -y kubelet
+    [ -f /usr/bin/kubectl ]  && yum remove -y kubectl
+
+    yum install -y "kubeadm${version}" "kubelet${version}" "kubectl${version}" kubernetes-cni --disableexcludes=kubernetes
+  fi
 
   [ -d /etc/bash_completion.d ] && \
     { kubectl completion bash > /etc/bash_completion.d/kubectl; \
@@ -969,12 +1128,16 @@ EOF
 
 
 function script::install_haproxy() {
-   # 安装haproxy
+  # 安装haproxy
    
-   local api_servers="$*"
+  local api_servers="$*"
    
-   yum install -y haproxy
-   [ ! -f /etc/haproxy/haproxy.cfg_bak ] && cp /etc/haproxy/haproxy.cfg{,_bak}
+  if [[ "${OFFLINE_TAG:-}" != "1" ]];then
+    [ -f /usr/bin/haproxy ] && yum remove -y haproxy
+    yum install -y haproxy
+  fi
+
+  [ ! -f /etc/haproxy/haproxy.cfg_bak ] && cp /etc/haproxy/haproxy.cfg{,_bak}
 cat << EOF > /etc/haproxy/haproxy.cfg
 global
   log /dev/log    local0
@@ -1093,7 +1256,7 @@ function check::exit_code() {
   if [[ "x${code}" == "x0" ]]; then
     log::info "[${app}]" "${desc} succeeded."
   else
-    log::err "[${app}]" "${desc} failed."
+    log::error "[${app}]" "${desc} failed."
     [[ "x$exit_script" == "xexit" ]] && exit "$code"
   fi
 }
@@ -1122,22 +1285,37 @@ function check::preflight() {
 function install::package() {
   # 安装包
  
+  if [[ "${KUBE_CRI}" == "cri-o" && "${KUBE_CRI_VERSION}" == "latest" ]]; then
+    KUBE_CRI_VERSION="${KUBE_VERSION}"
+    if [[ "${KUBE_CRI_VERSION}" == "latest" ]]; then
+      if command::exec "127.0.0.1" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"; then
+        KUBE_CRI_VERSION="${COMMAND_OUTPUT#v}"
+      else
+        log::error "[install]" "get kubernetes stable version error. Please specify the version!"
+        exit 1
+      fi
+    fi
+    KUBE_CRI_VERSION="${KUBE_CRI_VERSION%.*}"
+  fi
+
   for host in $MASTER_NODES $WORKER_NODES
   do
-    # install docker
-    log::info "[install]" "install docker on $host."
+    # install cri
+    log::info "[install]" "install ${KUBE_CRI} on $host."
     command::exec "${host}" "
-	  $(if [[ "${OFFLINE_TAG:-}" == "1" ]];then declare -f script::install_docker | sed 's/yum install/#yum install/g';else declare -f script::install_docker;fi)
-      script::install_docker $DOCKER_VERSION
-	"
-    check::exit_code "$?" "install" "install docker on $host"
+      export OFFLINE_TAG=${OFFLINE_TAG:-0}
+      $(declare -f script::install_"${KUBE_CRI}")
+      script::install_${KUBE_CRI} $KUBE_CRI_VERSION
+    "
+    check::exit_code "$?" "install" "install ${KUBE_CRI} on $host"
 
     # install kube
     log::info "[install]" "install kube on $host"
     command::exec "${host}" "
-	  $(if [[ "${OFFLINE_TAG:-}" == "1" ]];then declare -f script::install_kube | sed 's/yum install/#yum install/g';else declare -f script::install_kube;fi)
+      export OFFLINE_TAG=${OFFLINE_TAG:-0}
+      $(declare -f script::install_kube)
       script::install_kube $KUBE_VERSION
-	"
+    "
     check::exit_code "$?" "install" "install kube on $host"
   done
 
@@ -1159,7 +1337,8 @@ function install::package() {
     # install haproxy
     log::info "[install]" "install haproxy on $host"
 	command::exec "${host}" "
-	  $(if [[ "${OFFLINE_TAG:-}" == "1" ]];then declare -f script::install_haproxy | sed 's/yum install/#yum install/g';else declare -f script::install_haproxy;fi)
+      export OFFLINE_TAG=${OFFLINE_TAG:-0}
+      $(declare -f script::install_haproxy)
       script::install_haproxy \"$apiservers\"
 	"
     check::exit_code "$?" "install" "install haproxy on $host"
@@ -1173,7 +1352,7 @@ function install::package() {
       if command::exec "127.0.0.1" "wget https://storage.googleapis.com/kubernetes-release/release/stable.txt -q -O -"; then
         version="${COMMAND_OUTPUT#v}"
       else
-        log::err "[install]" "get kubernetes stable version error. Please specify the version!"
+        log::error "[install]" "get kubernetes stable version error. Please specify the version!"
         exit 1
       fi
     fi
@@ -1451,7 +1630,7 @@ function init::add_node() {
   for host in $MASTER_NODES $WORKER_NODES
   do
     if [[ $node_hosts == *"$host"* ]]; then
-      log::err "[init]" "The host $host is already in the cluster!"
+      log::error "[init]" "The host $host is already in the cluster!"
       exit 1
     fi
   done
@@ -1505,6 +1684,15 @@ function kubeadm::init() {
   command::exec "${MGMT_NODE}" "
     cat << EOF > /etc/kubernetes/kubeadmcfg.yaml
 ---
+apiVersion: kubeadm.k8s.io/v1beta2
+kind: InitConfiguration
+nodeRegistration:
+  # cri 配置
+  criSocket: ${KUBE_CRI_ENDPOINT:-/var/run/dockershim.sock}
+  kubeletExtraArgs:
+    runtime-cgroups: /system.slice/${KUBE_CRI//-/}.service
+    pod-infra-container-image: $KUBE_IMAGE_REPO/pause:3.2
+---
 apiVersion: kubeproxy.config.k8s.io/v1alpha1
 kind: KubeProxyConfiguration
 mode: ipvs
@@ -1518,6 +1706,8 @@ ipvs:
 apiVersion: kubelet.config.k8s.io/v1beta1
 kind: KubeletConfiguration
 maxPods: 200
+cgroupDriver: systemd
+runtimeRequestTimeout: 5m
 # 此配置保证了 kubelet 能在 swap 开启的情况下启动
 failSwapOn: false
 nodeStatusUpdateFrequency: 5s
@@ -1550,15 +1740,15 @@ kubeReserved:
 systemReserved:
   cpu: 300m\$(if [[ \$(cat /proc/meminfo | awk '/MemTotal/ {print \$2}') -gt 3670016 ]]; then echo -e '\n  memory: 512Mi';fi)
   ephemeral-storage: 1Gi
-kubeReservedCgroup: /kube
-systemReservedCgroup: /system
+kubeReservedCgroup: /kube.slice
+systemReservedCgroup: /system.slice
 enforceNodeAllocatable: 
 - pods
 - kube-reserved
 - system-reserved
 
 ---
-apiVersion: kubeadm.k8s.io/v1beta1
+apiVersion: kubeadm.k8s.io/v1beta2
 kind: ClusterConfiguration
 kubernetesVersion: $KUBE_VERSION
 controlPlaneEndpoint: $KUBE_APISERVER:6443
@@ -1663,7 +1853,7 @@ function kubeadm::join() {
   get::command_output "CACRT_HASH" "$?" "exit"
   
   command::exec "${MGMT_NODE}" "
-    kubeadm init phase upload-certs --upload-certs 2>> /dev/null | tail -1
+    kubeadm init phase upload-certs --upload-certs --config /etc/kubernetes/kubeadmcfg.yaml 2>> /dev/null | tail -1
   "
   get::command_output "INTI_CERTKEY" "$?" "exit"
   
@@ -1677,7 +1867,26 @@ function kubeadm::join() {
     [[ "${MGMT_NODE}" == "$host" ]] && continue
     log::info "[kubeadm join]" "master $host join cluster."
     command::exec "${host}" "
-      kubeadm join $KUBE_APISERVER:6443 --token ${INIT_TOKEN:-} --discovery-token-ca-cert-hash sha256:${CACRT_HASH:-} --control-plane --certificate-key ${INTI_CERTKEY:-}
+      cat << EOF > /etc/kubernetes/kubeadmcfg.yaml
+---
+apiVersion: kubeadm.k8s.io/v1beta2
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: $KUBE_APISERVER:6443
+    caCertHashes:
+    - sha256:${CACRT_HASH:-}
+    token: ${INIT_TOKEN}
+  timeout: 5m0s
+controlPlane:
+  certificateKey: ${INTI_CERTKEY:-}
+nodeRegistration:
+  criSocket: ${KUBE_CRI_ENDPOINT:-/var/run/dockershim.sock}
+  kubeletExtraArgs:
+    runtime-cgroups: /system.slice/${KUBE_CRI//-/}.service
+    pod-infra-container-image: $KUBE_IMAGE_REPO/pause:3.2
+EOF
+      kubeadm join --config /etc/kubernetes/kubeadmcfg.yaml
     "
     check::exit_code "$?" "kubeadm join" "master $host join cluster"
 
@@ -1698,7 +1907,24 @@ function kubeadm::join() {
     log::info "[kubeadm join]" "worker $host join cluster."
     command::exec "${host}" "
       mkdir -p /etc/kubernetes/manifests
-      kubeadm join $KUBE_APISERVER:6443 --token ${INIT_TOKEN:-} --discovery-token-ca-cert-hash sha256:${CACRT_HASH:-}
+      cat << EOF > /etc/kubernetes/kubeadmcfg.yaml
+---
+apiVersion: kubeadm.k8s.io/v1beta2
+kind: JoinConfiguration
+discovery:
+  bootstrapToken:
+    apiServerEndpoint: $KUBE_APISERVER:6443
+    caCertHashes:
+    - sha256:${CACRT_HASH:-}
+    token: ${INIT_TOKEN}
+  timeout: 5m0s
+nodeRegistration:
+  criSocket: ${KUBE_CRI_ENDPOINT:-/var/run/dockershim.sock}
+  kubeletExtraArgs:
+    runtime-cgroups: /system.slice/${KUBE_CRI//-/}.service
+    pod-infra-container-image: $KUBE_IMAGE_REPO/pause:3.2
+EOF
+      kubeadm join --config /etc/kubernetes/kubeadmcfg.yaml
     "
     check::exit_code "$?" "kubeadm join" "worker $host join cluster"
   
@@ -1801,7 +2027,7 @@ function config::haproxy_backend() {
   command::exec "${MGMT_NODE}" "
     kubectl get node --selector='!node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].status.addresses[?(@.type==\"InternalIP\")].address}'
   "
-  get::command_output "worker_nodes" "$?" "exit"
+  get::command_output "worker_nodes" "$?"
   
   for host in ${worker_nodes:-}
   do
@@ -1826,7 +2052,7 @@ function get::command_output() {
      log::info "[command]" "get $app value succeeded."
      eval "$app=\"${COMMAND_OUTPUT}\""
    else
-     log::err "[command]" "get $app value failed."
+     log::error "[command]" "get $app value failed."
      [[ "$is_exit" == "exit" ]] && exit "$status"
    fi
    return "$status"
@@ -2831,22 +3057,29 @@ fi
 
 
 function add::ops() {
-   # 运维操作
+  # 运维操作
    
-   local master_num
-   log::info "[ops]" "add etcd snapshot cronjob"
-   master_num=$(awk '{print NF}' <<< "${MASTER_NODES}")
-   command::exec "${MGMT_NODE}" "
-     kubeadm config images list --config=/etc/kubernetes/kubeadmcfg.yaml 2>/dev/null | grep etcd:
-   "
-   get::command_output "etcd_image" "$?"
-   command::exec "${MGMT_NODE}" "
-     kubectl get node --selector='node-role.kubernetes.io/master' --no-headers | wc -l
-   "
-   get::command_output "master_num" "$?"
+  local master_num
+  master_num=$(awk '{print NF}' <<< "${MASTER_NODES}")
+  
+  log::info "[ops]" "add anti-affinity strategy to coredns"
+  command::exec "${MGMT_NODE}" """
+    kubectl -n kube-system patch deployment coredns --patch '{\"spec\": {\"template\": {\"spec\": {\"affinity\":{\"podAntiAffinity\":{\"preferredDuringSchedulingIgnoredDuringExecution\":[{\"weight\":100,\"podAffinityTerm\":{\"labelSelector\":{\"matchExpressions\":[{\"key\":\"k8s-app\",\"operator\":\"In\",\"values\":[\"coredns\"]}]},\"topologyKey\":\"kubernetes.io/hostname\"}}]}}}}}}' --record
+  """
+  check::exit_code "$?" "ops" "add anti-affinity strategy to coredns"
 
-   [[ "${master_num:-0}" == "0" ]] && master_num=1
-   kube::apply "etcd-snapshot" """
+  log::info "[ops]" "add etcd snapshot cronjob"
+  command::exec "${MGMT_NODE}" "
+    kubeadm config images list --config=/etc/kubernetes/kubeadmcfg.yaml 2>/dev/null | grep etcd:
+  "
+  get::command_output "etcd_image" "$?"
+  command::exec "${MGMT_NODE}" "
+    kubectl get node --selector='node-role.kubernetes.io/master' --no-headers | wc -l
+  "
+  get::command_output "master_num" "$?"
+
+  [[ "${master_num:-0}" == "0" ]] && master_num=1
+  kube::apply "etcd-snapshot" """
 ---
 apiVersion: batch/v1beta1
 kind: CronJob
@@ -2956,24 +3189,36 @@ function reset::node() {
   local host=$1
   log::info "[reset]" "node $host"
   command::exec "${host}" "
-    set +e
-    kubeadm reset -f
-    systemctl stop kubelet
-    yum remove -y kubeadm kubelet kubectl
-    [ -f /etc/haproxy/haproxy.cfg ] && systemctl stop haproxy
+    set +ex
+    cri_socket=\"\"
+    [ -S /var/run/crio/crio.sock ] && cri_socket=\"--cri-socket /var/run/crio/crio.sock\"
+    [ -S /run/containerd/containerd.sock ] && cri_socket=\"--cri-socket /run/containerd/containerd.sock\"
+    kubeadm reset -f \$cri_socket
+    [ -f /usr/bin/kubelet ] && { systemctl stop kubelet; find /var/lib/kubelet | xargs -n 1 findmnt -n -o TARGET -T | sort | uniq | xargs -r umount -v; yum remove -y kubeadm kubelet kubectl; }
+    [ -d /etc/kubernetes ] && rm -rf /etc/kubernetes/* /var/lib/kubelet/* /var/lib/etcd/* \$HOME/.kube /etc/cni/net.d/* /var/lib/dockershim/* /var/lib/cni/* /var/run/kubernetes/*
+
+    [ -f /usr/bin/docker ] && { docker rm -f -v \$(docker ps | grep kube | awk '{print \$1}'); systemctl stop docker; rm -rf \$HOME/.docker /etc/docker/* /var/lib/docker/*; yum remove -y docker; }
+    [ -f /usr/bin/containerd ] && { crictl rm \$(crictl ps -a -q); systemctl stop containerd; rm -rf /etc/containerd/* /var/lib/containerd/*; yum remove -y containerd.io; }
+    [ -f /usr/bin/crio ] && { crictl rm \$(crictl ps -a -q); systemctl stop crio; rm -rf /etc/crictl.yaml /etc/crio/* /var/run/crio/*; yum remove -y cri-o; }
+    [ -f /usr/bin/runc ] && { find /run/containers/ /var/lib/containers/ | xargs -n 1 findmnt -n -o TARGET -T | sort | uniq | xargs -r umount -v; rm -rf /var/lib/containers/* /var/run/containers/*; yum remove -y runc; }
+    [ -f /usr/sbin/haproxy ] && { systemctl stop haproxy; rm -rf /etc/haproxy/*; yum remove -y haproxy; }
+
     sed -i -e \"/$KUBE_APISERVER/d\" -e '/-worker-/d' -e '/-master-/d' /etc/hosts
     sed -i '/## Kainstall managed start/,/## Kainstall managed end/d' /etc/security/limits.conf /etc/systemd/system.conf /etc/bashrc /etc/rc.local /etc/audit/rules.d/audit.rules
-    [ -d /var/lib/kubelet ] && find /var/lib/kubelet | xargs -n 1 findmnt -n -t tmpfs -o TARGET -T | uniq | xargs -r umount -v
-    rm -rf /etc/kubernetes/* /var/lib/etcd/* \$HOME/.kube /etc/cni/net.d/* /var/lib/elasticsearch/* /var/lib/longhorn/*
+    
+    [ -d /var/lib/elasticsearch ] && rm -rf /var/lib/elasticsearch/*
+    [ -d /var/lib/longhorn ] &&  rm -rf /var/lib/longhorn/*
     [ -d \"${OFFLINE_DIR:-/tmp/abc}\" ] && rm -rf \"${OFFLINE_DIR:-/tmp/abc}\"
+
     ipvsadm --clear
     iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X
-    docker rm -f -v \$(docker ps | grep kube | awk '{print \$1}')
-    systemctl restart docker
-    ip link delete flannel.1 || true
-    ip link delete cni0 || true
-    modprobe -r ipip && modprobe ipip
-    echo reset done.
+    [ -d /sys/class/net/kube-ipvs0 ] && ip link delete kube-ipvs0
+    [ -d /sys/class/net/cni0 ] && ip link delete cni0
+    [ -d /sys/class/net/docker0 ] && ip link delete docker0
+    [ -d /sys/class/net/dummy0 ] && ip link delete dummy0
+    [ -d /sys/class/net/flannel.1 ] && ip link delete flannel.1
+    modprobe -r ipip
+    echo done.
   "
   check::exit_code "$?" "reset" "$host: reset"
 }
@@ -2989,7 +3234,7 @@ function reset::cluster() {
   "
   get::command_output "all_node" "$?"
   
-  all_node=$(echo "${MASTER_NODES} ${WORKER_NODES} ${all_node}" | awk '{for (i=1;i<=NF;i++) if (!a[$i]++) printf("%s%s",$i,FS)}')
+  all_node=$(echo "${WORKER_NODES} ${MASTER_NODES} ${all_node}" | awk '{for (i=1;i<=NF;i++) if (!a[$i]++) printf("%s%s",$i,FS)}')
 
   for host in $all_node
   do
@@ -3069,7 +3314,7 @@ function offline::load() {
 function offline::cluster() {
   # 集群节点加载离线包
 
-  [ ! -f "${OFFLINE_FILE}" ] && { log::err "[offline]" "not found ${OFFLINE_FILE}" ; exit 1; }
+  [ ! -f "${OFFLINE_FILE}" ] && { log::error "[offline]" "not found ${OFFLINE_FILE}" ; exit 1; }
 
   log::info "[offline]" "Unzip offline package on local."
   tar zxf "${OFFLINE_FILE}"  -C "${TMP_DIR}/"
@@ -3290,6 +3535,23 @@ function update::self {
 }
 
 
+function transform::data {
+  # 数据处理及限制
+
+  MASTER_NODES=$(echo "${MASTER_NODES}" | tr ',' ' ')
+  WORKER_NODES=$(echo "${WORKER_NODES}" | tr ',' ' ')
+
+  if ! utils::is_element_in_array "$KUBE_CRI" docker containerd cri-o ; then
+    log::error "[limit]" "$KUBE_CRI is not supported, only [docker,containerd,cri-o]"
+    exit 1
+  fi
+
+  [[ "$KUBE_CRI" != "docker" && "${OFFLINE_TAG:-}" == "1" ]] && { log::error "[limit]" "$KUBE_CRI is not supported offline, only docker"; exit 1; }
+  [[ "$KUBE_CRI" == "containerd" && "${KUBE_CRI_ENDPOINT}" == "/var/run/dockershim.sock" ]] && KUBE_CRI_ENDPOINT="unix:///run/containerd/containerd.sock"
+  [[ "$KUBE_CRI" == "cri-o" && "${KUBE_CRI_ENDPOINT}" == "/var/run/dockershim.sock"  ]] && KUBE_CRI_ENDPOINT="unix:///var/run/crio/crio.sock"
+}
+
+
 function help::usage {
   # 使用帮助
   
@@ -3324,6 +3586,9 @@ Flag:
   -M,--monitor         cluster monitor, choose: [prometheus]
   -l,--log             cluster log, choose: [elasticsearch]
   -s,--storage         cluster storage, choose: [rook,longhorn]
+     --cri             cri runtime, choose: [docker,containerd,cri-o], default: ${KUBE_CRI}
+     --cri-version     cri version, default: ${KUBE_CRI_VERSION}
+     --cri-endpoint    cri endpoint, default: ${KUBE_CRI_ENDPOINT}
   -U,--upgrade-kernel  upgrade kernel
   -of,--offline-file   specify the offline package file to load
       --10years        the certificate period is 10 years.
@@ -3448,6 +3713,15 @@ while [ "${1:-}" != "" ]; do
                             ADDON_TAG=1
                             KUBE_ADDON=${1:-$KUBE_ADDON}
                             ;;
+    --cri )                 shift
+                            KUBE_CRI=${1:-$KUBE_CRI}
+                            ;;
+    --cri-version )         shift
+                            KUBE_CRI_VERSION=${1:-$KUBE_CRI_VERSION}
+                            ;;
+    --cri-endpoint )        shift
+                            KUBE_CRI_ENDPOINT=${1:-$KUBE_CRI_ENDPOINT}
+                            ;;
     -U | --upgrade-kernel ) UPGRADE_KERNEL_TAG=1
                             ;;
     -of | --offline-file )  shift
@@ -3473,9 +3747,8 @@ done
 # 开始
 log::info "[start]" "bash $0 ${SCRIPT_PARAMETER//${SSH_PASSWORD:-${SUDO_PASSWORD:-}}/zzzzzz}"  
 
-# 转换
-MASTER_NODES=$(echo "${MASTER_NODES}" | tr ',' ' ')
-WORKER_NODES=$(echo "${WORKER_NODES}" | tr ',' ' ')
+# 数据处理
+transform::data
 
 # 预检
 check::preflight
