@@ -47,7 +47,7 @@ MEM: `4G`
 - 安装`docker`, `kube`组件。
 - 初始化`kubernetes`集群,以及增加或删除节点。
 - 安装`ingress`组件，可选`nginx`，`traefik`。
-- 安装`network`组件，可选`flannel`，`calico`。
+- 安装`network`组件，可选`flannel`，`calico`，`cilium`。
 - 安装`monitor`组件，可选`prometheus`。
 - 安装`log`组件，可选`elasticsearch`。
 - 安装`storage`组件，可选`rook`，`longhorn`。
@@ -70,8 +70,9 @@ MEM: `4G`
 | common | [kubernetes](https://github.com/kubernetes/kubernetes) | latest             | ![kubernetes release](https://img.shields.io/github/v/release/kubernetes/kubernetes?sort=semver) |
 | network | [flannel](https://github.com/coreos/flannel) | 0.13.0            | ![flannel release](https://img.shields.io/github/v/release/coreos/flannel) |
 | network | [calico](https://github.com/projectcalico/calico) | 3.18.1 | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
+| network | [cilium](https://github.com/cilium/cilium) | 1.9.5 | ![cilium release ](https://img.shields.io/github/v/release/cilium/cilium?sort=semver) |
 | addons | [metrics server](https://github.com/kubernetes-sigs/metrics-server) | 0.4.2             | ![metrics-server release](https://img.shields.io/github/v/release/kubernetes-sigs/metrics-server) |
-| addons | [nodelocaldns](https://github.com/kubernetes/dns/tree/master/cmd/node-cache) | 1.16.0           | 1.16.0 |
+| addons | [nodelocaldns](https://github.com/kubernetes/dns/tree/master/cmd/node-cache) | latest           | 1.17.0 |
 | ingress | [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.44.0          | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
 | ingress | [traefik](https://github.com/traefik/traefik) | 2.4.7          | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
 | monitor | [kube_prometheus](https://github.com/prometheus-operator/kube-prometheus) | 0.7.0             | ![kube-prometheus release](https://img.shields.io/github/v/release/prometheus-operator/kube-prometheus) |
@@ -121,7 +122,7 @@ Flag:
      --private-key     ssh private key
   -P,--port            ssh port, default: 22
   -v,--version         kube version, default: latest
-  -n,--network         cluster network, choose: [flannel,calico], default: flannel
+  -n,--network         cluster network, choose: [flannel,calico,cilium], default: flannel
   -i,--ingress         ingress controller, choose: [nginx,traefik], default: nginx
   -ui,--ui             cluster web ui, choose: [dashboard,kubesphere], default: dashboard
   -a,--addon           cluster add-ons, choose: [metrics-server,nodelocaldns], default: metrics-server
@@ -317,6 +318,7 @@ METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.4.2}"
 INGRESS_NGINX="${INGRESS_NGINX:-0.44.0}"
 TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.4.5}"
 CALICO_VERSION="${CALICO_VERSION:-3.18.0}"
+CILIUM_VERSION="${CILIUM_VERSION:-1.9.5}"
 KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.7.0}"
 ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.11.1}"
 ROOK_VERSION="${ROOK_VERSION:-1.5.7}"

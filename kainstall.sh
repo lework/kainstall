@@ -2526,7 +2526,7 @@ function add::addon() {
   
     command::exec "${MGMT_NODE}" "
       cluster_dns=\$(kubectl -n kube-system get svc kube-dns -o jsonpath={.spec.clusterIP})
-      sed -i -e \"s/k8s.gcr.io/${GCR_PROXY}/g\" \
+      sed -i -e \"s#k8s.gcr.io/dns#${KUBE_IMAGE_REPO}#g\" \
              -e \"s/__PILLAR__CLUSTER__DNS__/\$cluster_dns/g\" \
              -e \"s/__PILLAR__UPSTREAM__SERVERS__/\$cluster_dns/g\" \
              -e \"s/__PILLAR__LOCAL__DNS__/169.254.20.10/g\" \
