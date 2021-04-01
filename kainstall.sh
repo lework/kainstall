@@ -25,6 +25,7 @@ METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.4.2}"
 INGRESS_NGINX="${INGRESS_NGINX:-0.44.0}"
 TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.4.7}"
 CALICO_VERSION="${CALICO_VERSION:-3.18.1}"
+CILIUM_VERSION="${CILIUM_VERSION:-1.9.5}"
 KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.7.0}"
 ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.11.2}"
 ROOK_VERSION="${ROOK_VERSION:-1.5.9}"
@@ -843,7 +844,7 @@ function script::upgrade_kernel() {
   sed -e "s/^mirrorlist=/#mirrorlist=/g" \
       -e "s/elrepo.org\/linux/mirrors.tuna.tsinghua.edu.cn\/elrepo/g" \
       -i /etc/yum.repos.d/elrepo.repo
-  yum install -y --disablerepo="*" --enablerepo=elrepo-kernelkernel-ml{,-devel}
+  yum install -y --disablerepo="*" --enablerepo=elrepo-kernel kernel-ml{,-devel}
 
   grub2-set-default 0 && grub2-mkconfig -o /etc/grub2.cfg
   grubby --default-kernel
@@ -1237,6 +1238,25 @@ function check::os() {
 }
 
 
+function check::kernel() {
+  # 检查os kernel 版本
+
+  local version=${1:-}
+  
+  log::info "[check]" "kernel version not less than ${version}"
+  for host in $MASTER_NODES $WORKER_NODES
+  do
+    command::exec "${host}" "
+      kernel_version=\$(uname -r)
+      kernel_version=\${kernel_version/-*}
+      echo kernel_version \${kernel_version}
+      [[ \${kernel_version//.} -ge ${version//.} ]] && exit 0 || exit 1
+    "
+    check::exit_code "$?" "check" "$host kernel version" "exit"
+  done
+
+}
+
 function check::apiserver_conn() {
   # 检查apiserver连通性
 
@@ -1273,6 +1293,9 @@ function check::preflight() {
 
   # check os
   check::os
+
+  # check os kernel
+  [[ "${KUBE_NETWORK:-}" == "cilium" ]] && check::kernel 4.9.17
 
   # check apiserver conn
   if [[ $(( ${ADD_TAG:-0} + ${DEL_TAG:-0} + ${UPGRADE_TAG:-0} + ${RENEW_CERT_TAG:-0} )) -gt 0 ]]; then
@@ -1635,7 +1658,7 @@ function init::add_node() {
     fi
   done
   
-  if [[ "$MASTER_NODES" != "" ]]; then
+  if [[ "$MASTER_NODES" != "127.0.0.1" ]]; then
     command::exec "${MGMT_NODE}" "
       kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
     "
@@ -2416,7 +2439,64 @@ function add::network() {
     kube::apply "${OFFLINE_DIR}/manifests/calicoctl.yaml"
     kube::wait "calico-kube-controllers" "kube-system" "pods" "k8s-app=calico-kube-controllers"
     kube::wait "calico-node" "kube-system" "pods" "k8s-app=calico-node"
-    
+
+  elif [[ "$KUBE_NETWORK" == "cilium" ]]; then 
+    log::info "[network]" "add cilium"
+
+    local cilium_file="${OFFLINE_DIR}/manifests/cilium.yml"
+    local cilium_hubble_file="${OFFLINE_DIR}/manifests/cilium_hubble.yml"
+    utils::download_file "https://cdn.jsdelivr.net/gh/cilium/cilium@${CILIUM_VERSION}/install/kubernetes/quick-install.yaml" "${cilium_file}"
+    utils::download_file "https://cdn.jsdelivr.net/gh/cilium/cilium@${CILIUM_VERSION}/install/kubernetes/quick-hubble-install.yaml" "${cilium_hubble_file}"
+
+    local all_node=""
+    if [[ "${MASTER_NODES}" == "127.0.0.1" && "${WORKER_NODES}" == "" ]]; then 
+      command::exec "${MGMT_NODE}" "
+        kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {end}'
+      "
+      get::command_output "all_node" "$?"
+    else
+      all_node="${MASTER_NODES} ${WORKER_NODES}"
+    fi
+
+    for host in $all_node
+    do
+      command::exec "${host}" "mount bpffs -t bpf /sys/fs/bpf"
+      check::exit_code "$?" "network" "${host}: mount bpf filesystem"
+    done
+
+    command::exec "${MGMT_NODE}" "
+      sed -i \"s#10.0.0.0/8#${KUBE_POD_SUBNET}#g\" \"${cilium_file}\"
+    "
+    kube::apply "${cilium_file}"
+    kube::wait "cilium-node" "kube-system" "pods" "k8s-app=cilium"
+    kube::wait "cilium-operator" "kube-system" "pods" "name=cilium-operator"
+    kube::apply "${cilium_hubble_file}"
+    kube::wait "hubble-relay" "kube-system" "pods" "k8s-app=hubble-relay"
+
+    log::info "[monitor]" "add hubble-ui ingress"
+    kube::apply "hubble-ui ingress" "
+---
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: hubble-ui
+  namespace: kube-system
+  annotations:
+    kubernetes.io/ingress.class: ${KUBE_INGRESS}
+spec:
+  rules:
+  - host: hubble-ui.cluster.local
+    http:
+      paths:
+      - backend:
+          serviceName: hubble-ui
+          servicePort: 80
+    "
+    # shellcheck disable=SC2181
+    if [[ "$?" == "0" ]]; then                                                                                                                                            
+      get::ingress_conn
+      log::access "[ingress]" "curl -H 'Host:hubble-ui.cluster.local' http://${INGRESS_CONN}"
+    fi
   else
     log::warning "[network]" "No $KUBE_NETWORK config."
   fi
@@ -3064,7 +3144,7 @@ function add::ops() {
   
   log::info "[ops]" "add anti-affinity strategy to coredns"
   command::exec "${MGMT_NODE}" """
-    kubectl -n kube-system patch deployment coredns --patch '{\"spec\": {\"template\": {\"spec\": {\"affinity\":{\"podAntiAffinity\":{\"preferredDuringSchedulingIgnoredDuringExecution\":[{\"weight\":100,\"podAffinityTerm\":{\"labelSelector\":{\"matchExpressions\":[{\"key\":\"k8s-app\",\"operator\":\"In\",\"values\":[\"coredns\"]}]},\"topologyKey\":\"kubernetes.io/hostname\"}}]}}}}}}' --record
+    kubectl -n kube-system patch deployment coredns --patch '{\"spec\": {\"template\": {\"spec\": {\"affinity\":{\"podAntiAffinity\":{\"preferredDuringSchedulingIgnoredDuringExecution\":[{\"weight\":100,\"podAffinityTerm\":{\"labelSelector\":{\"matchExpressions\":[{\"key\":\"k8s-app\",\"operator\":\"In\",\"values\":[\"kube-dns\"]}]},\"topologyKey\":\"kubernetes.io/hostname\"}}]}}}}}}' --record
   """
   check::exit_code "$?" "ops" "add anti-affinity strategy to coredns"
 
@@ -3541,6 +3621,8 @@ function transform::data {
   MASTER_NODES=$(echo "${MASTER_NODES}" | tr ',' ' ')
   WORKER_NODES=$(echo "${WORKER_NODES}" | tr ',' ' ')
 
+  [[ "$MASTER_NODES" == "" ]] && MASTER_NODES="127.0.0.1"
+
   if ! utils::is_element_in_array "$KUBE_CRI" docker containerd cri-o ; then
     log::error "[limit]" "$KUBE_CRI is not supported, only [docker,containerd,cri-o]"
     exit 1
@@ -3579,14 +3661,14 @@ Flag:
      --private-key     ssh private key
   -P,--port            ssh port, default: ${SSH_PORT}
   -v,--version         kube version, default: ${KUBE_VERSION}
-  -n,--network         cluster network, choose: [flannel,calico], default: ${KUBE_NETWORK}
+  -n,--network         cluster network, choose: [flannel,calico,cilium], default: ${KUBE_NETWORK}
   -i,--ingress         ingress controller, choose: [nginx,traefik], default: ${KUBE_INGRESS}
   -ui,--ui             cluster web ui, choose: [dashboard,kubesphere], default: ${KUBE_UI}
   -a,--addon           cluster add-ons, choose: [metrics-server,nodelocaldns], default: ${KUBE_ADDON}
   -M,--monitor         cluster monitor, choose: [prometheus]
   -l,--log             cluster log, choose: [elasticsearch]
   -s,--storage         cluster storage, choose: [rook,longhorn]
-     --cri             cri runtime, choose: [docker,containerd,cri-o], default: ${KUBE_CRI}
+     --cri             cri tools, choose: [docker,containerd,cri-o], default: ${KUBE_CRI}
      --cri-version     cri version, default: ${KUBE_CRI_VERSION}
      --cri-endpoint    cri endpoint, default: ${KUBE_CRI_ENDPOINT}
   -U,--upgrade-kernel  upgrade kernel
@@ -3755,7 +3837,6 @@ check::preflight
 
 # 动作
 if [[ "x${INIT_TAG:-}" == "x1" ]]; then
-  [[ "$MASTER_NODES" == "" ]] && MASTER_NODES="127.0.0.1"
   init::cluster
 elif [[ "x${ADD_TAG:-}" == "x1" ]]; then
   [[ "x${NETWORK_TAG:-}" == "x1" ]] && { add::network; add=1; }
@@ -3765,10 +3846,10 @@ elif [[ "x${ADD_TAG:-}" == "x1" ]]; then
   [[ "x${LOG_TAG:-}" == "x1" ]] && { add::log; add=1; }
   [[ "x${UI_TAG:-}" == "x1" ]] && { add::ui; add=1; }
   [[ "x${ADDON_TAG:-}" == "x1" ]] && { add::addon; add=1; }
-  [[ "$MASTER_NODES" != "" || "$WORKER_NODES" != "" ]] && { add::node; add=1; }
+  [[ "$MASTER_NODES" != "127.0.0.1" || "$WORKER_NODES" != "" ]] && { add::node; add=1; }
   [[ "${add:-}" != "1" ]] && help::usage
 elif [[ "x${DEL_TAG:-}" == "x1" ]]; then
-  if [[ "$MASTER_NODES" != "" || "$WORKER_NODES" != "" ]]; then del::node; else help::usage; fi
+  if [[ "$MASTER_NODES" != "127.0.0.1" || "$WORKER_NODES" != "" ]]; then del::node; else help::usage; fi
 elif [[ "x${RESET_TAG:-}" == "x1" ]]; then
   reset::cluster
 elif [[ "x${RENEW_CERT_TAG:-}" == "x1" ]]; then
