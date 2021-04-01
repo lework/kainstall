@@ -2,7 +2,7 @@
 
 [![GitHub Super-Linter](https://github.com/lework/kainstall/workflows/Lint%20Code%20Base/badge.svg)](https://github.com/marketplace/actions/super-linter)
 
-使用 shell 脚本, 基于 kubeadm 一键部署 kubernetes 集群
+使用 shell 脚本, 基于 kubeadm 一键部署 kubernetes HA 集群
 
 ## 为什么
 
@@ -44,7 +44,7 @@ MEM: `4G`
   - 配置 `audit` 审计
   - 安装 `ipvs` 模块
   - 更新内核
-- 安装`docker`, `kube`组件。
+- 安装`kube`组件。
 - 初始化`kubernetes`集群,以及增加或删除节点。
 - 安装`ingress`组件，可选`nginx`，`traefik`。
 - 安装`network`组件，可选`flannel`，`calico`，`cilium`。

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 ###################################################################
-#Script Name	: kainstall.sh
-#Description	: Install kubernetes cluster using kubeadm.
+#Script Name    : kainstall.sh
+#Description    : Install kubernetes cluster using kubeadm.
 #Create Date    : 2020-09-17
 #Author       	: lework
 #Email         	: lework@yeah.net
@@ -304,6 +304,10 @@ function command::scp() {
 function script::init_node() {
   # 节点初始化脚本
   
+  # clean
+  sed -i -e "/$KUBE_APISERVER/d" -e '/-worker-/d' -e '/-master-/d' /etc/hosts
+  sed -i '/## Kainstall managed start/,/## Kainstall managed end/d' /etc/security/limits.conf /etc/systemd/system.conf /etc/bashrc /etc/rc.local /etc/audit/rules.d/audit.rules  
+
   # Disable selinux
   sed -i '/SELINUX/s/enforcing/disabled/' /etc/selinux/config
   setenforce 0
@@ -322,7 +326,7 @@ function script::init_node() {
     -e 's!mirror.centos.org!mirrors.aliyun.com!g' \
     -i /etc/yum.repos.d/CentOS-Base.repo
   
-  yum install -y epel-release
+  [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y epel-release
   
   [ -f /etc/yum.repos.d/epel.repo ] && sed -e 's!^mirrorlist=!#mirrorlist=!g' \
     -e 's!^metalink=!#metalink=!g' \
@@ -744,7 +748,7 @@ EOF
   echo 'ALL ALL=NOPASSWD: /usr/bin/crictl info' > /etc/sudoers.d/crictl
 
   # time sync
-  yum install -y chrony 
+  [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y chrony 
   [ ! -f /etc/chrony.conf_bak ] && cp /etc/chrony.conf{,_bak} #备份默认配置
   cat << EOF > /etc/chrony.conf
 server ntp.aliyun.com iburst
@@ -767,7 +771,7 @@ EOF
   chronyc sourcestats
 
   # ipvs
-  yum install -y ipvsadm ipset sysstat conntrack libseccomp
+  [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y ipvsadm ipset sysstat conntrack libseccomp
   module=(
   ip_vs
   ip_vs_rr
@@ -784,7 +788,7 @@ EOF
   systemctl enable --now systemd-modules-load.service
 
   # audit
-  yum install -y audit audit-libs
+  [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y audit audit-libs
 cat << EOF >> /etc/audit/rules.d/audit.rules
 ## Kainstall managed start
 # docker
@@ -840,11 +844,11 @@ function script::upgrade_kernel() {
 
   local ver; ver=$(rpm --eval "%{centos_ver}")
 
-  yum install -y "https://www.elrepo.org/elrepo-release-${ver}.el${ver}.elrepo.noarch.rpm"
+  [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y "https://www.elrepo.org/elrepo-release-${ver}.el${ver}.elrepo.noarch.rpm"
   sed -e "s/^mirrorlist=/#mirrorlist=/g" \
       -e "s/elrepo.org\/linux/mirrors.tuna.tsinghua.edu.cn\/elrepo/g" \
       -i /etc/yum.repos.d/elrepo.repo
-  yum install -y --disablerepo="*" --enablerepo=elrepo-kernel kernel-ml{,-devel}
+  [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y --disablerepo="*" --enablerepo=elrepo-kernel kernel-ml{,-devel}
 
   grub2-set-default 0 && grub2-mkconfig -o /etc/grub2.cfg
   grubby --default-kernel
@@ -1416,9 +1420,10 @@ function init::upgrade_kernel() {
   do
     log::info "[init]" "upgrade kernel: $host"
     command::exec "${host}" "
-	  $(if [[ "${OFFLINE_TAG:-}" == "1" ]];then declare -f script::upgrade_kernel | sed 's/yum install/#yum install/g';else declare -f script::upgrade_kernel;fi)
+      export OFFLINE_TAG=${OFFLINE_TAG:-0}
+      $(declare -f script::upgrade_kernel)
       script::upgrade_kernel
-	"
+	  "
     check::exit_code "$?" "init" "upgrade kernel $host" "exit"
   done
   
@@ -1557,14 +1562,15 @@ function init::node_config() {
   do
     log::info "[init]" "master: $host"
     command::exec "${host}" "
-	  $(if [[ "${OFFLINE_TAG:-}" == "1" ]];then declare -f script::init_node | sed 's/yum install/#yum install/g';else declare -f script::init_node;fi)
+      export OFFLINE_TAG=${OFFLINE_TAG:-0} KUBE_APISERVER=${KUBE_APISERVER}
+      $(declare -f script::init_node)
       script::init_node
-	"
+	 "
     check::exit_code "$?" "init" "init master $host"
 
     # 设置主机名和解析
     command::exec "${host}" "
-      printf \"${MGMT_NODE_IP} $KUBE_APISERVER\\n$node_hosts\" >> /etc/hosts
+      printf \"\\n${MGMT_NODE_IP} $KUBE_APISERVER\\n$node_hosts\" >> /etc/hosts
       hostnamectl set-hostname ${HOSTNAME_PREFIX}-master-node${master_index}
     "
     check::exit_code "$?" "init" "$host set hostname and hostname resolution"
@@ -1590,14 +1596,15 @@ EOF
   do
     log::info "[init]" "worker: $host"
     command::exec "${host}" "
-	  $(if [[ "${OFFLINE_TAG:-}" == "1" ]];then declare -f script::init_node | sed 's/yum install/#yum install/g';else declare -f script::init_node;fi)
+      export OFFLINE_TAG=${OFFLINE_TAG:-0} KUBE_APISERVER=${KUBE_APISERVER}
+      $(declare -f script::init_node)
       script::init_node
-	"
+	  "
     check::exit_code "$?" "init" "init worker $host"
 
     # 设置主机名和解析
     command::exec "${host}" "
-      printf \"127.0.0.1 $KUBE_APISERVER\\n$node_hosts\" >> /etc/hosts
+      printf \"\\n127.0.0.1 $KUBE_APISERVER\\n$node_hosts\" >> /etc/hosts
       hostnamectl set-hostname ${HOSTNAME_PREFIX}-worker-node${worker_index}
     "
     worker_index=$((worker_index + 1))
@@ -1658,7 +1665,7 @@ function init::add_node() {
     fi
   done
   
-  if [[ "$MASTER_NODES" != "127.0.0.1" ]]; then
+  if [[ "$MASTER_NODES" != "" ]]; then
     command::exec "${MGMT_NODE}" "
       kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
     "
@@ -2064,6 +2071,23 @@ function config::haproxy_backend() {
 }
 
 
+function config::etcd_snapshot() {
+  # 更新 etcd 备份副本
+
+  command::exec "${MGMT_NODE}" "
+    count=\$(kubectl get node --selector='node-role.kubernetes.io/master' --no-headers | wc -l)
+    kubectl -n kube-system patch cronjobs etcd-snapshot --patch \"
+spec:
+  jobTemplate:
+    spec:
+      completions: \${count:-1}
+      parallelism: \${count:-1}
+\"
+  "
+  check::exit_code "$?" "config" "etcd-snapshot completions options"
+}
+
+
 function get::command_output() {
    # 获取命令的返回值
 
@@ -2449,7 +2473,7 @@ function add::network() {
     utils::download_file "https://cdn.jsdelivr.net/gh/cilium/cilium@${CILIUM_VERSION}/install/kubernetes/quick-hubble-install.yaml" "${cilium_hubble_file}"
 
     local all_node=""
-    if [[ "${MASTER_NODES}" == "127.0.0.1" && "${WORKER_NODES}" == "" ]]; then 
+    if [[ "${MASTER_NODES}" == "" && "${WORKER_NODES}" == "" ]]; then 
       command::exec "${MGMT_NODE}" "
         kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {end}'
       "
@@ -3292,11 +3316,10 @@ function reset::node() {
 
     ipvsadm --clear
     iptables -F && iptables -t nat -F && iptables -t mangle -F && iptables -X
-    [ -d /sys/class/net/kube-ipvs0 ] && ip link delete kube-ipvs0
-    [ -d /sys/class/net/cni0 ] && ip link delete cni0
-    [ -d /sys/class/net/docker0 ] && ip link delete docker0
-    [ -d /sys/class/net/dummy0 ] && ip link delete dummy0
-    [ -d /sys/class/net/flannel.1 ] && ip link delete flannel.1
+    for int in kube-ipvs0 cni0 docker0 dummy0 flannel.1 cilium_host cilium_net cilium_vxlan lxc_health nodelocaldns 
+    do
+      [ -d /sys/class/net/\${int} ] && ip link delete \${int}
+    done
     modprobe -r ipip
     echo done.
   "
@@ -3464,7 +3487,9 @@ function add::node() {
   kubeadm::join
   # 4. haproxy添加apiserver
   config::haproxy_backend "add"
-  # 5. 查看集群状态
+  # 5. 更新 etcd snapshot 副本
+  config::etcd_snapshot
+  # 6. 查看集群状态
   kube::status
 }
 
@@ -3523,6 +3548,7 @@ function del::node() {
      "
      check::exit_code "$?" "del" "remove del node hostname resolution"
   done
+  [ "$MASTER_NODES" != "" ] && config::etcd_snapshot
   kube::status
 }
 
@@ -3620,8 +3646,6 @@ function transform::data {
 
   MASTER_NODES=$(echo "${MASTER_NODES}" | tr ',' ' ')
   WORKER_NODES=$(echo "${WORKER_NODES}" | tr ',' ' ')
-
-  [[ "$MASTER_NODES" == "" ]] && MASTER_NODES="127.0.0.1"
 
   if ! utils::is_element_in_array "$KUBE_CRI" docker containerd cri-o ; then
     log::error "[limit]" "$KUBE_CRI is not supported, only [docker,containerd,cri-o]"
@@ -3837,6 +3861,7 @@ check::preflight
 
 # 动作
 if [[ "x${INIT_TAG:-}" == "x1" ]]; then
+  [[ "$MASTER_NODES" == "" ]] && MASTER_NODES="127.0.0.1"
   init::cluster
 elif [[ "x${ADD_TAG:-}" == "x1" ]]; then
   [[ "x${NETWORK_TAG:-}" == "x1" ]] && { add::network; add=1; }
@@ -3846,10 +3871,10 @@ elif [[ "x${ADD_TAG:-}" == "x1" ]]; then
   [[ "x${LOG_TAG:-}" == "x1" ]] && { add::log; add=1; }
   [[ "x${UI_TAG:-}" == "x1" ]] && { add::ui; add=1; }
   [[ "x${ADDON_TAG:-}" == "x1" ]] && { add::addon; add=1; }
-  [[ "$MASTER_NODES" != "127.0.0.1" || "$WORKER_NODES" != "" ]] && { add::node; add=1; }
+  [[ "$MASTER_NODES" != "" || "$WORKER_NODES" != "" ]] && { add::node; add=1; }
   [[ "${add:-}" != "1" ]] && help::usage
 elif [[ "x${DEL_TAG:-}" == "x1" ]]; then
-  if [[ "$MASTER_NODES" != "127.0.0.1" || "$WORKER_NODES" != "" ]]; then del::node; else help::usage; fi
+  if [[ "$MASTER_NODES" != "" || "$WORKER_NODES" != "" ]]; then del::node; else help::usage; fi
 elif [[ "x${RESET_TAG:-}" == "x1" ]]; then
   reset::cluster
 elif [[ "x${RENEW_CERT_TAG:-}" == "x1" ]]; then
