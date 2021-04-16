@@ -791,6 +791,9 @@ EOF
   [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y audit audit-libs
 cat << EOF >> /etc/audit/rules.d/audit.rules
 ## Kainstall managed start
+# Ignore errors
+-i
+
 # docker
 -w /usr/bin/dockerd -k docker
 -w /var/lib/docker -k docker
@@ -1462,7 +1465,7 @@ function cert::renew_node() {
       command::exec "${host}" "cp -rf /etc/kubernetes /etc/kubernetes_\$(date +%Y-%m-%d)"
       check::exit_code "$?" "cert" "$host: backup kubernetes config"
       
-      command::exec "${host}" "kubeadm alpha certs renew all"
+      command::exec "${host}" "kubeadm certs renew all 2>/dev/null|| kubeadm alpha certs renew all"
       check::exit_code "$?" "cert" "$host: renew certs"
       
       command::exec "${host}" "
@@ -1496,7 +1499,7 @@ function cert::renew_node() {
 
     log::info "[cert]" "get kubelet config"
     command::exec "${MGMT_NODE}" "
-      kubeadm alpha kubeconfig user --org system:nodes --client-name system:node:${host}
+      kubeadm kubeconfig user --org system:nodes --client-name system:node:${host}  --config /etc/kubernetes/kubeadmcfg.yaml || kubeadm alpha kubeconfig user --org system:nodes --client-name system:node:${host}  --config /etc/kubernetes/kubeadmcfg.yaml
     "
     get::command_output "kubelet_config" "$?" "exit"
 
@@ -1540,7 +1543,7 @@ function cert::renew() {
     echo
     kubectl get node
     echo
-    kubeadm alpha certs check-expiration
+    kubeadm certs check-expiration 2>/dev/null || kubeadm alpha certs check-expiration
   " && printf "%s" "${COMMAND_OUTPUT}"
 }
 
@@ -1841,6 +1844,12 @@ scheduler:
     name: localtime
     readOnly: true
     pathType: File
+$(if [[ "${KUBE_VERSION}" == "latest" || "${KUBE_VERSION}" == *"1.21"* ]]; then
+echo "dns:
+  type: CoreDNS
+  imageRepository: docker.io
+  imageTag: 1.8.0"
+fi)
 EOF
 "
   check::exit_code "$?" "kubeadm init" "${MGMT_NODE}: set kubeadmcfg.yaml" "exit"
