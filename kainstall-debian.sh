@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 ###################################################################
-#Script Name    : kainstall.sh
+#Script Name    : kainstall-debian.sh
 #Description    : Install kubernetes cluster using kubeadm.
-#Create Date    : 2020-09-17
-#Author       	: lework
-#Email         	: lework@yeah.net
+#Create Date    : 2021-04-18
+#Author         : lework
+#Email          : lework@yeah.net
 ###################################################################
 
 
@@ -78,8 +78,8 @@ COMMAND_OUTPUT=""
 SCRIPT_PARAMETER="$*"
 OFFLINE_DIR="/tmp/kainstall-offline-file/"
 OFFLINE_FILE=""
-OS_SUPPORT="centos7 centos8"
-GITHUB_PROXY="${GITHUB_PROXY:-https://gh.con.sh/}"
+OS_SUPPORT="debian9 debian10"
+GITHUB_PROXY="${GITHUB_PROXY:-https://gh.lework.workers.dev/}"
 GCR_PROXY="${GCR_PROXY:-k8sgcr.lework.workers.dev}"
 SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
 
@@ -199,7 +199,7 @@ function utils::download_file() {
       [ ! -d \"${dest_dirname}\" ] && mkdir -pv \"${dest_dirname}\" 
       wget --timeout=10 --waitretry=3 --tries=5 --retry-connrefused \"${url}\" -O \"${dest}\"
       if [[ \"${unzip_tag}\" == \"unzip\" ]]; then
-        command -v unzip 2>/dev/null || yum install -y unzip
+        command -v unzip 2>/dev/null || apt-get install -y unzip
         unzip -o \"${dest}\" -d \"${dest_dirname}\"
       fi
     else
@@ -222,7 +222,7 @@ function utils::is_element_in_array() {
 
   for walker in "${array[@]}"
   do
-      [[ "${walker}" = "${element}" ]] && return 0
+    [[ "${walker}" = "${element}" ]] && return 0
   done
 
   return 1
@@ -247,7 +247,7 @@ function command::exec() {
   
   command="$(utils::quote "$command")"
   
-  if [[ "x${host}" == "x127.0.0.1" ]]; then
+  if [[ "${host}" == "127.0.0.1" ]]; then
     # 本地执行
     log::exec "[command]" "bash -c $(printf "%s" "${command//${SUDO_PASSWORD:-}/zzzzzz}")"
     # shellcheck disable=SC2094
@@ -278,7 +278,7 @@ function command::scp() {
   local src=${2:-}
   local dest=${3:-/tmp/}
   
-  if [[ "x${host}" == "x127.0.0.1" ]]; then
+  if [[ "${host}" == "127.0.0.1" ]]; then
     local command="cp -rf ${src} ${dest}"
     log::exec "[command]" "bash -c \"${command}\""
     # shellcheck disable=SC2094
@@ -306,7 +306,7 @@ function script::init_node() {
   
   # clean
   sed -i -e "/$KUBE_APISERVER/d" -e '/-worker-/d' -e '/-master-/d' /etc/hosts
-  sed -i '/## Kainstall managed start/,/## Kainstall managed end/d' /etc/security/limits.conf /etc/systemd/system.conf /etc/bashrc /etc/rc.local /etc/audit/rules.d/audit.rules  
+  sed -i '/## Kainstall managed start/,/## Kainstall managed end/d' /etc/security/limits.conf /etc/systemd/system.conf /etc/bash.bashrc /etc/audit/rules.d/audit.rules  
 
   # Disable selinux
   sed -i '/SELINUX/s/enforcing/disabled/' /etc/selinux/config
@@ -321,19 +321,34 @@ function script::init_node() {
   systemctl disable firewalld
 
   # repo
-  [ -f /etc/yum.repos.d/CentOS-Base.repo ] && sed -e 's!^#baseurl=!baseurl=!g' \
-    -e 's!^mirrorlist=!#mirrorlist=!g' \
-    -e 's!mirror.centos.org!mirrors.aliyun.com!g' \
-    -i /etc/yum.repos.d/CentOS-Base.repo
-  
-  [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y epel-release
-  
-  [ -f /etc/yum.repos.d/epel.repo ] && sed -e 's!^mirrorlist=!#mirrorlist=!g' \
-    -e 's!^metalink=!#metalink=!g' \
-    -e 's!^#baseurl=!baseurl=!g' \
-    -e 's!//download\.fedoraproject\.org/pub!//mirrors.aliyun.com!g' \
-    -e 's!http://mirrors\.aliyun!https://mirrors.aliyun!g' \
-    -i /etc/yum.repos.d/epel.repo
+  [ ! -f /etc/apt/sources.list_bak ] && cp /etc/apt/sources.list{,_bak}
+  mv /etc/apt/sources.list{,.bak}
+  local codename; codename="$(dpkg --status tzdata|grep Provides|cut -f2 -d'-')"
+  cat << EOF > /etc/apt/sources.list
+deb http://mirrors.aliyun.com/debian/ ${codename} main contrib non-free
+deb-src http://mirrors.aliyun.com/debian/  ${codename} main contrib non-free
+
+deb http://mirrors.aliyun.com/debian/  ${codename}-updates main contrib non-free
+deb-src http://mirrors.aliyun.com/debian/  ${codename}-updates main contrib non-free
+
+deb http://mirrors.aliyun.com/debian-security/  ${codename}/updates main contrib non-free
+deb-src http://mirrors.aliyun.com/debian-security/  ${codename}/updates main contrib non-free
+EOF
+  apt update
+
+  echo -e '#!/bin/sh\nexit 101' | install -m 755 /dev/stdin /usr/sbin/policy-rc.d
+
+  systemctl mask apt-daily.service apt-daily-upgrade.service
+  systemctl stop apt-daily.timer apt-daily-upgrade.timer
+  systemctl disable apt-daily.timer apt-daily-upgrade.timer
+  systemctl kill --kill-who=all apt-daily.service
+
+cat << EOF > /etc/apt/apt.conf.d/10cloudinit-disable
+APT::Periodic::Enable "0";
+// undo what's in 20auto-upgrade
+APT::Periodic::Update-Package-Lists "0";
+APT::Periodic::Unattended-Upgrade "0";
+EOF
 
   # Change limits
   [ ! -f /etc/security/limits.conf_bak ] && cp /etc/security/limits.conf{,_bak}
@@ -594,10 +609,9 @@ kernel.core_pattern=core
 kernel.softlockup_all_cpu_backtrace=1
 kernel.softlockup_panic=1
 EOF
-  sysctl --system
 
   # history
-  cat << EOF >> /etc/bashrc
+  cat << EOF >> /etc/bash.bashrc
 ## Kainstall managed start
 # history actions record，include action time, user, login ip
 HISTFILESIZE=5000
@@ -644,7 +658,7 @@ EOF
 # @Author  : lework
 # @Desc    : ssh login banner
 
-export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 shopt -q login_shell && : || return 0
 echo -e "\033[0;32m
  ██╗  ██╗ █████╗ ███████╗
@@ -712,7 +726,7 @@ read one five fifteen rest < /proc/loadavg
 LOADAVG_INFO="\033[0;33m\${one}\033[0m / \${five} / \${fifteen} with \033[1;34m\$(( cpun*cpuc ))\033[0m core(s) at \033[1;34m\$(grep '^cpu MHz' /proc/cpuinfo | tail -1 | awk '{print \$4}')\033 MHz"
 
 # mem
-MEM_INFO="\$(cat /proc/meminfo | awk '/MemTotal:/{total=\$2/1024/1024;next} /MemAvailable:/{use=total-\$2/1024/1024; printf("\033[0;33m%.2fGiB\033[0m of \033[1;34m%.2fGiB\033[0m RAM used (\033[0;33m%.2f%\033[0m)",use,total,(use/total)*100);}')"
+MEM_INFO="\$(cat /proc/meminfo | awk '/MemTotal:/{total=\$2/1024/1024;next} /MemAvailable:/{use=total-\$2/1024/1024; printf("\033[0;33m%.2fGiB\033[0m of \033[1;34m%.2fGiB\033[0m RAM used (\033[0;33m%.2f%%\033[0m)",use,total,(use/total)*100);}')"
 
 # network
 # extranet_ip=" and \$(curl -s ip.cip.cc)"
@@ -745,10 +759,11 @@ echo -e "
 EOF
 
   chmod +x /etc/profile.d/zz-ssh-login-info.sh
-  echo 'ALL ALL=NOPASSWD: /usr/bin/crictl info' > /etc/sudoers.d/crictl
+  echo 'ALL ALL=(ALL) NOPASSWD:/usr/bin/crictl' > /etc/sudoers.d/crictl
 
   # time sync
-  [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y chrony 
+  ntpd --help >/dev/null 2>&1 && apt-get remove -y ntp
+  [[ "${OFFLINE_TAG:-}" != "1" ]] && apt-get install -y chrony 
   [ ! -f /etc/chrony.conf_bak ] && cp /etc/chrony.conf{,_bak} #备份默认配置
   cat << EOF > /etc/chrony.conf
 server ntp.aliyun.com iburst
@@ -770,8 +785,11 @@ EOF
   chronyc sources -v
   chronyc sourcestats
 
+  # package
+  [[ "${OFFLINE_TAG:-}" != "1" ]] && apt-get install -y apt-transport-https ca-certificates curl wget gnupg lsb-release
+
   # ipvs
-  [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y ipvsadm ipset sysstat conntrack libseccomp
+  [[ "${OFFLINE_TAG:-}" != "1" ]] && apt-get install -y ipvsadm ipset sysstat conntrack libseccomp2
   module=(
   ip_vs
   ip_vs_rr
@@ -785,10 +803,12 @@ EOF
   for kernel_module in "${module[@]}";do
      /sbin/modinfo -F filename "$kernel_module" |& grep -qv ERROR && echo "$kernel_module" >> /etc/modules-load.d/ipvs.conf
   done
-  systemctl enable --now systemd-modules-load.service
+  systemctl restart systemd-modules-load
+  systemctl enable systemd-modules-load
+  sysctl --system
 
   # audit
-  [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y audit audit-libs
+  [[ "${OFFLINE_TAG:-}" != "1" ]] && apt-get install -y auditd audispd-plugins
 cat << EOF >> /etc/audit/rules.d/audit.rules
 ## Kainstall managed start
 # Ignore errors
@@ -845,18 +865,13 @@ EOF
 function script::upgrade_kernel() {
   # 升级内核
 
-  local ver; ver=$(rpm --eval "%{centos_ver}")
+  local codename; codename="$(dpkg --status tzdata|grep Provides|cut -f2 -d'-')"
 
-  [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y "https://www.elrepo.org/elrepo-release-${ver}.el${ver}.elrepo.noarch.rpm"
-  sed -e "s/^mirrorlist=/#mirrorlist=/g" \
-      -e "s/elrepo.org\/linux/mirrors.tuna.tsinghua.edu.cn\/elrepo/g" \
-      -i /etc/yum.repos.d/elrepo.repo
-  [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y --disablerepo="*" --enablerepo=elrepo-kernel kernel-ml{,-devel}
-
-  grub2-set-default 0 && grub2-mkconfig -o /etc/grub2.cfg
-  grubby --default-kernel
-  grubby --args="user_namespace.enable=1" --update-kernel="$(grubby --default-kernel)"
-  
+  if [[ "${OFFLINE_TAG:-}" != "1" ]]; then
+    echo "deb [trusted=yes] http://mirrors.aliyun.com/debian ${codename}-backports main" > /etc/apt/sources.list.d/backports.list
+    apt update
+    apt -t "${codename}-backports" install linux-image-amd64 linux-headers-amd64 -y
+  fi 
 }
 
 
@@ -864,13 +879,14 @@ function script::upgrage_kube() {
   # 节点软件升级
 
   local role=${1:-init}
-  local version="-${2:-latest}"
-  version="${version#-latest}"
+  local version="=${2:-latest}-00"
+  version="${version#=latest-00}"
 
   set -e
   echo '[install] kubeadm'
   kubeadm version
-  yum install -y "kubeadm${version}" --disableexcludes=kubernetes
+  apt-get update
+  apt-get install -y "kubeadm${version}"
   kubeadm version
 
   echo '[upgrade]'
@@ -885,7 +901,7 @@ function script::upgrage_kube() {
 
   echo '[install] kubelet kubectl'
   kubectl version --client=true
-  yum install -y "kubelet${version}" "kubectl${version}" --disableexcludes=kubernetes
+  apt-get install -y "kubelet${version}" "kubectl${version}"
   kubectl version --client=true
 
   [ -f /usr/lib/systemd/system/kubelet.service.d/10-kubeadm.conf ] && \
@@ -899,23 +915,19 @@ function script::upgrage_kube() {
 function script::install_docker() {
   # 安装 docker
   
-  local version="-${1:-latest}"
-  version="${version#-latest}"
+  local version="=${1:-latest}-00"
+  version="${version#=latest-00}"
 
-  cat << EOF > /etc/yum.repos.d/docker-ce.repo
-[docker-ce-stable]
-name=Docker CE Stable - \$basearch
-baseurl=https://mirrors.aliyun.com/docker-ce/linux/centos/$(rpm --eval '%{centos_ver}')/\$basearch/stable
-enabled=1
-gpgcheck=1
-gpgkey=https://mirrors.aliyun.com/docker-ce/linux/centos/gpg
-EOF
+  wget -qO - http://mirrors.aliyun.com/docker-ce/linux/debian/gpg | sudo apt-key add -
+  echo "deb [trusted=yes] http://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker-ce.list
+  apt-get update
 
   if [[ "${OFFLINE_TAG:-}" != "1" ]];then
-    [ -f /usr/bin/docker ]  && yum remove -y docker-ce docker-ce-cli containerd.io
-
-    yum install -y "docker-ce${version}" "docker-ce-cli${version}" containerd.io bash-completion
+    [ -f "$(which docker)" ]  && apt remove -y docker-ce docker-ce-cli containerd.io
+    apt-get install -y "docker-ce${version}" "docker-ce-cli${version}" containerd.io bash-completion
   fi
+
+  apt-mark hold docker-ce docker-ce-cli containerd.io
 
   [ -f /usr/share/bash-completion/completions/docker ] && \
     cp -f /usr/share/bash-completion/completions/docker /etc/bash_completion.d/
@@ -974,22 +986,17 @@ EOF
 function script::install_containerd() {
   # 安装 containerd
   
-  local version="-${1:-latest}"
-  version="${version#-latest}"
+  local version="=${1:-latest}-00"
+  version="${version#=latest-00}"
 
-  cat << EOF > /etc/yum.repos.d/docker-ce.repo
-[docker-ce-stable]
-name=Docker CE Stable - \$basearch
-baseurl=https://mirrors.aliyun.com/docker-ce/linux/centos/$(rpm --eval '%{centos_ver}')/\$basearch/stable
-enabled=1
-gpgcheck=1
-gpgkey=https://mirrors.aliyun.com/docker-ce/linux/centos/gpg
-EOF
+  wget -qO - http://mirrors.aliyun.com/docker-ce/linux/debian/gpg | sudo apt-key add -
+  echo "deb [trusted=yes] http://mirrors.aliyun.com/docker-ce/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker-ce.list
+  apt-get update
 
   if [[ "${OFFLINE_TAG:-}" != "1" ]];then
-    [ -f /usr/bin/runc ]  && yum remove -y runc
-    [ -f /usr/bin/containerd ]  && yum remove -y containerd.io
-    yum install -y containerd.io"${version}" containernetworking bash-completion
+    [ -f "$(which runc)" ]  && apt remove -y runc
+    [ -f "$(which containerd)" ]  && apt remove -y containerd.io
+    apt-get install -y containerd.io"${version}" containernetworking bash-completion
   fi
 
   [ -d /etc/bash_completion.d ] && crictl completion bash > /etc/bash_completion.d/crictl
@@ -1012,7 +1019,6 @@ EOF
   
   systemctl restart containerd
   systemctl enable containerd
-  
 }
 
 function script::install_cri-o() {
@@ -1020,32 +1026,21 @@ function script::install_cri-o() {
   
   local version="${1:-latest}"
   version="${version##latest}"
-  os="CentOS_$(rpm --eval '%{centos_ver}')" && echo "${os}"
+  os="Debian_Unstable"
 
-  cat << EOF > /etc/yum.repos.d/devel_kubic_libcontainers_stable.repo
-[devel_kubic_libcontainers_stable]
-name=Stable Releases of Upstream github.com/containers packages
-type=rpm-md
-baseurl=https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/${os}/
-gpgcheck=1
-gpgkey=https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/${os}/repodata/repomd.xml.key
-enabled=1
+  echo "deb [trusted=yes] http://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$os/ /" > /etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list
+  echo "deb [trusted=yes] http://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/$version/$os/ /" > "/etc/apt/sources.list.d/devel:kubic:libcontainers:stable:cri-o:$version.list"
 
-[devel_kubic_libcontainers_stable_cri-o]
-name=devel:kubic:libcontainers:stable:cri-o
-type=rpm-md
-baseurl=https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/${version}/${os}/
-gpgcheck=1
-gpgkey=https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/${version}/${os}/repodata/repomd.xml.key
-enabled=1
-EOF
+  wget -qO - "https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable:cri-o:$version/$os/Release.key" | apt-key add -
+  wget -qO - "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable/$os/Release.key" | apt-key add -
+
+  apt-get update
 
   if [[ "${OFFLINE_TAG:-}" != "1" ]];then
-    [ -f /usr/bin/runc ]  && yum remove -y runc
-    [ -f /usr/bin/crio ]  && yum remove -y cri-o
-    [ -f /usr/bin/docker ]  && yum remove -y docker-ce docker-ce-cli containerd.io
-
-    yum install -y runc cri-o bash-completion --disablerepo=docker-ce-stable
+    [ -f "$(which runc)" ]  && apt remove -y runc
+    [ -f "$(which crio)" ]  && apt remove -y cri-o
+    [ -f "$(which docker)" ]  && apt remove -y docker-ce docker-ce-cli containerd.io
+    apt-get install -y cri-o runc bash-completion
   fi
 
   [ -d /etc/bash_completion.d ] && \
@@ -1053,6 +1048,7 @@ EOF
       crio completion bash > /etc/bash_completion.d/crio; \
       crio-status completion bash > /etc/bash_completion.d/crio-status; }
 
+  [ ! -f /etc/crio/crio.conf ] && crio config --default > /etc/crio/crio.conf
   sed -i -e "s#k8s.gcr.io#registry.cn-hangzhou.aliyuncs.com/kainstall#g" \
          -e 's|#registries = \[|registries = ["docker.io", "quay.io"]|g' /etc/crio/crio.conf
 
@@ -1086,6 +1082,9 @@ $(grep cniVersion /etc/cni/net.d/100-crio-bridge.conf)
 }
 EOF
   mv /etc/cni/net.d/100-crio-bridge.conf /etc/cni/net.d/10-crio.conf /etc/cni/net.d/200-loopback.conf /tmp/
+  [ ! -d /usr/lib/cri-o-runc/sbin/ ] && mkdir -p /usr/lib/cri-o-runc/sbin/
+  [ ! -f /usr/sbin/runc ] && ln -sv "$(which runc)" /usr/sbin/runc
+  [ ! -f /usr/lib/cri-o-runc/sbin/runc ] && ln -sv "$(which runc)" /usr/lib/cri-o-runc/sbin/runc
   systemctl restart crio
   systemctl enable crio
 }
@@ -1094,25 +1093,18 @@ EOF
 function script::install_kube() {
   # 安装kube组件
   
-  local version="-${1:-latest}"
-  version="${version#-latest}"
+  local version="=${1:-latest}-00"
+  version="${version#=latest-00}"
   
-  cat <<EOF > /etc/yum.repos.d/kubernetes.repo
-[kubernetes]
-name=Kubernetes
-baseurl=https://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-x86_64/
-enabled=1
-gpgcheck=1
-repo_gpgcheck=1
-gpgkey=https://mirrors.aliyun.com/kubernetes/yum/doc/yum-key.gpg https://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg
-EOF
+  echo 'deb [trusted=yes] http://mirrors.aliyun.com/kubernetes/apt kubernetes-xenial main' > /etc/apt/sources.list.d/kubernetes.list
+  wget -qO - http://mirrors.aliyun.com/kubernetes/apt/doc/apt-key.gpg | sudo apt-key add -
+  apt-get update
 
   if [[ "${OFFLINE_TAG:-}" != "1" ]];then
-    [ -f /usr/bin/kubeadm ]  && yum remove -y kubeadm
-    [ -f /usr/bin/kubelet ]  && yum remove -y kubelet
-    [ -f /usr/bin/kubectl ]  && yum remove -y kubectl
-
-    yum install -y "kubeadm${version}" "kubelet${version}" "kubectl${version}" kubernetes-cni --disableexcludes=kubernetes
+    [ -f "$(which kubeadm)" ]  && apt remove -y kubeadm
+    [ -f "$(which kubelet)" ]  && apt remove -y kubelet
+    [ -f "$(which kubectl)" ]  && apt remove -y kubectl
+    apt-get install -y "kubeadm${version}" "kubelet${version}" "kubectl${version}" kubernetes-cni
   fi
 
   [ -d /etc/bash_completion.d ] && \
@@ -1125,7 +1117,7 @@ EOF
 CPUAccounting=true
 MemoryAccounting=true
 BlockIOAccounting=true
-ExecStartPre=/usr/bin/bash -c '/usr/bin/mkdir -p /sys/fs/cgroup/{cpuset,hugetlb,memory,systemd,pids,"cpu,cpuacct"}/{system,kube,kubepods}.slice'
+ExecStartPre=/bin/bash -c '/bin/mkdir -p /sys/fs/cgroup/{cpuset,memory,hugetlb,systemd,pids,"cpu,cpuacct"}/{system,kube,kubepods}.slice||:'
 Slice=kube.slice
 EOF
   systemctl daemon-reload
@@ -1141,8 +1133,8 @@ function script::install_haproxy() {
   local api_servers="$*"
    
   if [[ "${OFFLINE_TAG:-}" != "1" ]];then
-    [ -f /usr/bin/haproxy ] && yum remove -y haproxy
-    yum install -y haproxy
+    [ -f "$(which haproxy)" ] && apt remove -y haproxy
+    apt-get install -y haproxy
   fi
 
   [ ! -f /etc/haproxy/haproxy.cfg_bak ] && cp /etc/haproxy/haproxy.cfg{,_bak}
@@ -1198,7 +1190,7 @@ function check::command_exists() {
   else
     log::warning "[check]" "I require $cmd but it's not installed."
     log::warning "[check]" "install $package package."
-    command::exec "127.0.0.1" "yum install -y ${package}"
+    command::exec "127.0.0.1" "apt-get install -y ${package}"
     check::exit_code "$?" "check" "$package install" "exit"
   fi
 }
@@ -1280,11 +1272,11 @@ function check::exit_code() {
   local desc=${3:-}
   local exit_script=${4:-}
 
-  if [[ "x${code}" == "x0" ]]; then
+  if [[ "${code}" == "0" ]]; then
     log::info "[${app}]" "${desc} succeeded."
   else
     log::error "[${app}]" "${desc} failed."
-    [[ "x$exit_script" == "xexit" ]] && exit "$code"
+    [[ "$exit_script" == "exit" ]] && exit "$code"
   fi
 }
 
@@ -1308,7 +1300,6 @@ function check::preflight() {
   if [[ $(( ${ADD_TAG:-0} + ${DEL_TAG:-0} + ${UPGRADE_TAG:-0} + ${RENEW_CERT_TAG:-0} )) -gt 0 ]]; then
     check::apiserver_conn
   fi
-
 }
 
 
@@ -1355,7 +1346,7 @@ function install::package() {
     get::command_output "apiservers" "$?"
   fi
 
-  if [[ "x${ADD_TAG:-}" == "x1" ]]; then
+  if [[ "${ADD_TAG:-}" == "1" ]]; then
     command::exec "${MGMT_NODE}" "
       kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{$.items[*].status.addresses[?(@.type==\"InternalIP\")].address}'
     "
@@ -1366,11 +1357,11 @@ function install::package() {
   do
     # install haproxy
     log::info "[install]" "install haproxy on $host"
-	command::exec "${host}" "
+  command::exec "${host}" "
       export OFFLINE_TAG=${OFFLINE_TAG:-0}
       $(declare -f script::install_haproxy)
       script::install_haproxy \"$apiservers\"
-	"
+  "
     check::exit_code "$?" "install" "install haproxy on $host"
   done
   
@@ -1400,14 +1391,14 @@ function install::package() {
       command::exec "${host}" "
         set -e
         if [[ -f /tmp/kubeadm-linux-amd64 ]]; then
-	      [[ -f /usr/bin/kubeadm && ! -f /usr/bin/kubeadm_src ]] && mv -fv /usr/bin/kubeadm{,_src}
+        [[ -f /usr/bin/kubeadm && ! -f /usr/bin/kubeadm_src ]] && mv -fv /usr/bin/kubeadm{,_src}
           mv -fv /tmp/kubeadm-linux-amd64 /usr/bin/kubeadm
           chmod +x /usr/bin/kubeadm
         else
           echo \"not found /tmp/kubeadm-linux-amd64\"
           exit 1
         fi
-	  "
+    "
       check::exit_code "$?" "install" "$host: use kubeadm 10 years certs client"
     done
   fi
@@ -1417,7 +1408,7 @@ function install::package() {
 function init::upgrade_kernel() {
   # 升级节点内核
 
-  [[ "x${UPGRADE_KERNEL_TAG:-}" != "x1" ]] && return
+  [[ "${UPGRADE_KERNEL_TAG:-}" != "1" ]] && return
 
   for host in $MASTER_NODES $WORKER_NODES
   do
@@ -1426,7 +1417,7 @@ function init::upgrade_kernel() {
       export OFFLINE_TAG=${OFFLINE_TAG:-0}
       $(declare -f script::upgrade_kernel)
       script::upgrade_kernel
-	  "
+    "
     check::exit_code "$?" "init" "upgrade kernel $host" "exit"
   done
   
@@ -1568,7 +1559,7 @@ function init::node_config() {
       export OFFLINE_TAG=${OFFLINE_TAG:-0} KUBE_APISERVER=${KUBE_APISERVER}
       $(declare -f script::init_node)
       script::init_node
-	 "
+   "
     check::exit_code "$?" "init" "init master $host"
 
     # 设置主机名和解析
@@ -1581,7 +1572,7 @@ function init::node_config() {
     # set audit-policy
     log::info "[init]" "$host: set audit-policy file."
     command::exec "${host}" "
-	  [ ! -d etc/kubernetes ] && mkdir -p /etc/kubernetes
+    [ ! -d etc/kubernetes ] && mkdir -p /etc/kubernetes
       cat << EOF > /etc/kubernetes/audit-policy.yaml
 # Log all requests at the Metadata level.
 apiVersion: audit.k8s.io/v1
@@ -1602,7 +1593,7 @@ EOF
       export OFFLINE_TAG=${OFFLINE_TAG:-0} KUBE_APISERVER=${KUBE_APISERVER}
       $(declare -f script::init_node)
       script::init_node
-	  "
+    "
     check::exit_code "$?" "init" "init worker $host"
 
     # 设置主机名和解析
@@ -1878,7 +1869,6 @@ EOF
     kubectl create clusterrolebinding node-server-auto-renew-crt --clusterrole=system:certificates.k8s.io:certificatesigningrequests:selfnodeserver --group=system:nodes
   "
   check::exit_code "$?" "kubeadm init" "Auto-Approve kubelet cert csr"
-
 }
 
 
@@ -2317,7 +2307,7 @@ spec:
     log::warning "[ingress]" "No $KUBE_INGRESS config."
   fi
 
-  if [[ "x$add_ingress_demo" == "x1" ]]; then
+  if [[ "$add_ingress_demo" == "1" ]]; then
     log::info "[ingress]" "add ingress default-http-backend"
     kube::apply "default-http-backend" """
 ---
@@ -3007,7 +2997,7 @@ function add::storage() {
     do
       log::info "[storage]"  "${host}: install iscsi-initiator-utils"
       command::exec "${host}" "
-        yum install -y iscsi-initiator-utils
+        apt-get install -y open-iscsi
       "
       check::exit_code "$?" "storage" "${host}: install iscsi-initiator-utils" "exit"
     done
@@ -3307,17 +3297,17 @@ function reset::node() {
     [ -S /var/run/crio/crio.sock ] && cri_socket=\"--cri-socket /var/run/crio/crio.sock\"
     [ -S /run/containerd/containerd.sock ] && cri_socket=\"--cri-socket /run/containerd/containerd.sock\"
     kubeadm reset -f \$cri_socket
-    [ -f /usr/bin/kubelet ] && { systemctl stop kubelet; find /var/lib/kubelet | xargs -n 1 findmnt -n -o TARGET -T | sort | uniq | xargs -r umount -v; yum remove -y kubeadm kubelet kubectl; }
+    [ -f \"\$(which kubelet)\" ] && { systemctl stop kubelet; find /var/lib/kubelet | xargs -n 1 findmnt -n -o TARGET -T | sort | uniq | xargs -r umount -v; apt remove -y kubeadm kubelet kubectl; }
     [ -d /etc/kubernetes ] && rm -rf /etc/kubernetes/* /var/lib/kubelet/* /var/lib/etcd/* \$HOME/.kube /etc/cni/net.d/* /var/lib/dockershim/* /var/lib/cni/* /var/run/kubernetes/*
 
-    [ -f /usr/bin/docker ] && { docker rm -f -v \$(docker ps | grep kube | awk '{print \$1}'); systemctl stop docker; rm -rf \$HOME/.docker /etc/docker/* /var/lib/docker/*; yum remove -y docker; }
-    [ -f /usr/bin/containerd ] && { crictl rm \$(crictl ps -a -q); systemctl stop containerd; rm -rf /etc/containerd/* /var/lib/containerd/*; yum remove -y containerd.io; }
-    [ -f /usr/bin/crio ] && { crictl rm \$(crictl ps -a -q); systemctl stop crio; rm -rf /etc/crictl.yaml /etc/crio/* /var/run/crio/*; yum remove -y cri-o; }
-    [ -f /usr/bin/runc ] && { find /run/containers/ /var/lib/containers/ | xargs -n 1 findmnt -n -o TARGET -T | sort | uniq | xargs -r umount -v; rm -rf /var/lib/containers/* /var/run/containers/*; yum remove -y runc; }
-    [ -f /usr/sbin/haproxy ] && { systemctl stop haproxy; rm -rf /etc/haproxy/*; yum remove -y haproxy; }
+    [ -f \"\$(which docker)\" ] && { docker rm -f -v \$(docker ps | grep kube | awk '{print \$1}'); systemctl stop docker; rm -rf \$HOME/.docker /etc/docker/* /var/lib/docker/*; apt remove -y docker; }
+    [ -f \"\$(which containerd)\" ] && { crictl rm \$(crictl ps -a -q); systemctl stop containerd; rm -rf /etc/containerd/* /var/lib/containerd/*; apt remove -y containerd.io; }
+    [ -f \"\$(which crio)\" ] && { crictl rm \$(crictl ps -a -q); systemctl stop crio; rm -rf /etc/crictl.yaml /etc/crio/* /var/run/crio/*; apt remove -y cri-o; }
+    [ -f \"\$(which runc)\" ] && { find /run/containers/ /var/lib/containers/ | xargs -n 1 findmnt -n -o TARGET -T | sort | uniq | xargs -r umount -v; rm -rf /var/lib/containers/* /var/run/containers/*; apt remove -y runc; }
+    [ -f \"\$(which haproxy)\" ] && { systemctl stop haproxy; rm -rf /etc/haproxy/*; apt remove -y haproxy; }
 
     sed -i -e \"/$KUBE_APISERVER/d\" -e '/-worker-/d' -e '/-master-/d' /etc/hosts
-    sed -i '/## Kainstall managed start/,/## Kainstall managed end/d' /etc/security/limits.conf /etc/systemd/system.conf /etc/bashrc /etc/rc.local /etc/audit/rules.d/audit.rules
+    sed -i '/## Kainstall managed start/,/## Kainstall managed end/d' /etc/security/limits.conf /etc/systemd/system.conf /etc/bash.bashrc /etc/audit/rules.d/audit.rules
     
     [ -d /var/lib/elasticsearch ] && rm -rf /var/lib/elasticsearch/*
     [ -d /var/lib/longhorn ] &&  rm -rf /var/lib/longhorn/*
@@ -3362,32 +3352,30 @@ function offline::load() {
   local role="${1:-}"
   local hosts=""
   
-
   if [[ "${role}" == "master" ]]; then
      hosts="${MASTER_NODES}"
   elif [[ "${role}" == "worker" ]]; then
      hosts="${WORKER_NODES}"
   fi
  
-
   for host in ${hosts}
   do
     log::info "[offline]" "${role} ${host}: load offline file"
-    command::exec "${host}"  "[[ ! -d \"${OFFLINE_DIR}\" ]] && { mkdir -pv \"${OFFLINE_DIR}\"; chmod 777 \"${OFFLINE_DIR}\"; }"
+    command::exec "${host}"  "[[ ! -d \"${OFFLINE_DIR}\" ]] && { mkdir -pv \"${OFFLINE_DIR}\"; chmod 777 \"${OFFLINE_DIR}\"; } ||:"
     check::exit_code "$?" "offline" "$host: mkdir offline dir" "exit"
 
-    if [[ "x${UPGRADE_KERNEL_TAG:-}" == "x1" ]]; then
-      command::scp "${host}" "${TMP_DIR}/rpms/kernel/*" "${OFFLINE_DIR}"
+    if [[ "${UPGRADE_KERNEL_TAG:-}" == "1" ]]; then
+      command::scp "${host}" "${TMP_DIR}/packages/kernel/*" "${OFFLINE_DIR}"
       check::exit_code "$?" "offline" "scp kernel file to $host" "exit"
     else
       log::info "[offline]" "${role} ${host}: copy offline file"
-      command::scp "${host}" "${TMP_DIR}/rpms/kubeadm/*" "${OFFLINE_DIR}"
+      command::scp "${host}" "${TMP_DIR}/packages/kubeadm/*" "${OFFLINE_DIR}"
       check::exit_code "$?" "offline" "scp kube file to $host" "exit"
-      command::scp "${host}" "${TMP_DIR}/rpms/all/*" "${OFFLINE_DIR}"
+      command::scp "${host}" "${TMP_DIR}/packages/all/*" "${OFFLINE_DIR}"
       check::exit_code "$?" "offline" "scp all file to $host" "exit"
 
       if [[ "${role}" == "worker" ]]; then
-        command::scp "${host}" "${TMP_DIR}/rpms/worker/*" "${OFFLINE_DIR}"
+        command::scp "${host}" "${TMP_DIR}/packages/worker/*" "${OFFLINE_DIR}"
         check::exit_code "$?" "offline" "scp worker file to $host" "exit"
       fi 
 
@@ -3399,20 +3387,20 @@ function offline::load() {
 
     
     log::info "[offline]" "${role} ${host}: install package"
-    command::exec "${host}" "yum localinstall -y --skip-broken ${OFFLINE_DIR}/*.rpm"
+    command::exec "${host}" "dpkg --force-all -i ${OFFLINE_DIR}/*.deb; DEBIAN_FRONTEND=noninteractive apt-get install -f -q -y"
     check::exit_code "$?" "offline" "${role} ${host}: install package" "exit"
   
-    if [[ "x${UPGRADE_KERNEL_TAG:-}" != "x1" ]]; then
+    if [[ "${UPGRADE_KERNEL_TAG:-}" != "1" ]]; then
       command::exec "${host}" "
         set -e
         systemctl start docker && \
         cd ${OFFLINE_DIR} && \
         gzip -d -c ${1}.tgz | docker load && gzip -d -c all.tgz | docker load
       "
-      check::exit_code "$?" "offline" "$host: load images" "exit"	
+      check::exit_code "$?" "offline" "$host: load images" "exit"  
     fi
     command::exec "${host}" "rm -rf ${OFFLINE_DIR:-/tmp/abc}"
-    check::exit_code "$?" "offline" "$host: clean offline file"	
+    check::exit_code "$?" "offline" "$host: clean offline file"  
   done
 
   command::scp "${MGMT_NODE}" "${TMP_DIR}/manifests" "${OFFLINE_DIR}"
@@ -3460,13 +3448,13 @@ function init::cluster() {
   # 7. 添加ingress
   add::ingress
   # 8. 添加storage
-  [[ "x${STORAGE_TAG:-}" == "x1" ]] && add::storage
+  [[ "${STORAGE_TAG:-}" == "1" ]] && add::storage
   # 9. 添加web ui
   add::ui
   # 10. 添加monitor
-  [[ "x${MONITOR_TAG:-}" == "x1" ]] && add::monitor
+  [[ "${MONITOR_TAG:-}" == "1" ]] && add::monitor
   # 11. 添加log
-  [[ "x${LOG_TAG:-}" == "x1" ]] && add::log
+  [[ "${LOG_TAG:-}" == "1" ]] && add::log
   # 12. 运维操作
   add::ops
   # 13. 查看集群状态
@@ -3629,7 +3617,7 @@ function upgrade::cluster() {
     command::exec "${MGMT_NODE}" "kubectl wait --for=condition=Ready node/${host} --timeout=120s"
     check::exit_code "$?" "upgrade" "${host} ready"
     sleep 5
-    command::exec "${MGMT_NODE}" "kubectl uncordon ${host}"
+    command::exec "${MGMT_NODE}" "$(declare -f utils::retry); utils::retry 6 kubectl uncordon ${host}"
     check::exit_code "$?" "upgrade" "uncordon ${host} node"
     sleep 5
   done
@@ -3869,28 +3857,28 @@ transform::data
 check::preflight
 
 # 动作
-if [[ "x${INIT_TAG:-}" == "x1" ]]; then
+if [[ "${INIT_TAG:-}" == "1" ]]; then
   [[ "$MASTER_NODES" == "" ]] && MASTER_NODES="127.0.0.1"
   init::cluster
-elif [[ "x${ADD_TAG:-}" == "x1" ]]; then
-  [[ "x${NETWORK_TAG:-}" == "x1" ]] && { add::network; add=1; }
-  [[ "x${INGRESS_TAG:-}" == "x1" ]] && { add::ingress; add=1; }
-  [[ "x${STORAGE_TAG:-}" == "x1" ]] && { add::storage; add=1; }
-  [[ "x${MONITOR_TAG:-}" == "x1" ]] && { add::monitor; add=1; }
-  [[ "x${LOG_TAG:-}" == "x1" ]] && { add::log; add=1; }
-  [[ "x${UI_TAG:-}" == "x1" ]] && { add::ui; add=1; }
-  [[ "x${ADDON_TAG:-}" == "x1" ]] && { add::addon; add=1; }
+elif [[ "${ADD_TAG:-}" == "1" ]]; then
+  [[ "${NETWORK_TAG:-}" == "1" ]] && { add::network; add=1; }
+  [[ "${INGRESS_TAG:-}" == "1" ]] && { add::ingress; add=1; }
+  [[ "${STORAGE_TAG:-}" == "1" ]] && { add::storage; add=1; }
+  [[ "${MONITOR_TAG:-}" == "1" ]] && { add::monitor; add=1; }
+  [[ "${LOG_TAG:-}" == "1" ]] && { add::log; add=1; }
+  [[ "${UI_TAG:-}" == "1" ]] && { add::ui; add=1; }
+  [[ "${ADDON_TAG:-}" == "1" ]] && { add::addon; add=1; }
   [[ "$MASTER_NODES" != "" || "$WORKER_NODES" != "" ]] && { add::node; add=1; }
   [[ "${add:-}" != "1" ]] && help::usage
-elif [[ "x${DEL_TAG:-}" == "x1" ]]; then
+elif [[ "${DEL_TAG:-}" == "1" ]]; then
   if [[ "$MASTER_NODES" != "" || "$WORKER_NODES" != "" ]]; then del::node; else help::usage; fi
-elif [[ "x${RESET_TAG:-}" == "x1" ]]; then
+elif [[ "${RESET_TAG:-}" == "1" ]]; then
   reset::cluster
-elif [[ "x${RENEW_CERT_TAG:-}" == "x1" ]]; then
+elif [[ "${RENEW_CERT_TAG:-}" == "1" ]]; then
   cert::renew
-elif [[ "x${UPGRADE_TAG:-}" == "x1" ]]; then
+elif [[ "${UPGRADE_TAG:-}" == "1" ]]; then
   upgrade::cluster
-elif [[ "x${UPDATE_TAG:-}" == "x1" ]]; then
+elif [[ "${UPDATE_TAG:-}" == "1" ]]; then
   update::self
 else
   help::usage

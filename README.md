@@ -12,7 +12,7 @@
 
 ## 要求
 
-OS: `centos 7.x x64` , `centos 8.x x64`
+OS: `centos 7.x x64` , `centos 8.x x64`,  `debian 9.x x64` , `debian 10.x x64`
 
 CPU: `2C`
 
@@ -91,19 +91,23 @@ MEM: `4G`
 ### 下载脚本
 
 ```bash
-wget https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall.sh
+# centos
+wget https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall-centos.sh
+
+# debian
+wget https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall-debian.sh
 ```
 
 ### 帮助信息
 
 ```bash
-# bash kainstall.sh
+# bash kainstall-centos.sh
 
 
 Install kubernetes cluster using kubeadm.
 
 Usage:
-  kainstall.sh [command]
+  kainstall-centos.sh [command]
 
 Available Commands:
   init            Init Kubernetes cluster.
@@ -141,56 +145,56 @@ Flag:
 
 Example:
   [init cluster]
-  kainstall.sh init \
+  kainstall-centos.sh init \
   --master 192.168.77.130,192.168.77.131,192.168.77.132 \
   --worker 192.168.77.133,192.168.77.134,192.168.77.135 \
   --user root \
   --password 123456 \
-  --version 1.20.4
+  --version 1.20.6
 
   [reset cluster]
-  kainstall.sh reset \
+  kainstall-centos.sh reset \
   --user root \
   --password 123456
 
   [add node]
-  kainstall.sh add \
+  kainstall-centos.sh add \
   --master 192.168.77.140,192.168.77.141 \
   --worker 192.168.77.143,192.168.77.144 \
   --user root \
   --password 123456 \
-  --version 1.20.4
+  --version 1.20.6
 
   [del node]
-  kainstall.sh del \
+  kainstall-centos.sh del \
   --master 192.168.77.140,192.168.77.141 \
   --worker 192.168.77.143,192.168.77.144 \
   --user root \
   --password 123456
  
   [other]
-  kainstall.sh renew-cert --user root --password 123456
-  kainstall.sh upgrade --version 1.20.4 --user root --password 123456
-  kainstall.sh update
-  kainstall.sh add --ingress traefik
-  kainstall.sh add --monitor prometheus
-  kainstall.sh add --log elasticsearch
-  kainstall.sh add --storage rook
-  kainstall.sh add --ui dashboard
-  kainstall.sh add --addon nodelocaldns
+  kainstall-centos.sh renew-cert --user root --password 123456
+  kainstall-centos.sh upgrade --version 1.20.6 --user root --password 123456
+  kainstall-centos.sh update
+  kainstall-centos.sh add --ingress traefik
+  kainstall-centos.sh add --monitor prometheus
+  kainstall-centos.sh add --log elasticsearch
+  kainstall-centos.sh add --storage rook
+  kainstall-centos.sh add --ui dashboard
+  kainstall-centos.sh add --addon nodelocaldns
 ```
 
 ### 初始化集群
 
 ```bash
 # 使用脚本参数
-bash kainstall.sh init \
+bash kainstall-centos.sh init \
   --master 192.168.77.130,192.168.77.131,192.168.77.132 \
   --worker 192.168.77.133,192.168.77.134 \
   --user root \
   --password 123456 \
   --port 22 \
-  --version 1.20.4
+  --version 1.20.6
 
 # 使用环境变量
 export MASTER_NODES="192.168.77.130,192.168.77.131,192.168.77.132"
@@ -198,8 +202,8 @@ export WORKER_NODES="192.168.77.133,192.168.77.134"
 export SSH_USER="root"
 export SSH_PASSWORD="123456"
 export SSH_PORT="22"
-export KUBE_VERSION="1.20.4"
-bash kainstall.sh init
+export KUBE_VERSION="1.20.6"
+bash kainstall-centos.sh init
 ```
 
 > 默认情况下，除了初始化集群外，还会安装 `ingress: nginx` , `ui: dashboard` 两个组件。
@@ -207,14 +211,14 @@ bash kainstall.sh init
 还可以使用一键安装方式, 连下载都省略了。
 
 ```bash
-bash -c "$(curl -sSL https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall.sh)"  \
+bash -c "$(curl -sSL https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall-centos.sh)"  \
   - init \
   --master 192.168.77.130,192.168.77.131,192.168.77.132 \
   --worker 192.168.77.133,192.168.77.134 \
   --user root \
   --password 123456 \
   --port 22 \
-  --version 1.20.4
+  --version 1.20.6
 ```
 
 ### 增加节点
@@ -223,13 +227,13 @@ bash -c "$(curl -sSL https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainsta
 
 ```bash
 # 增加单个master节点
-bash kainstall.sh add --master 192.168.77.135
+bash kainstall-centos.sh add --master 192.168.77.135
 
 # 增加单个worker节点
-bash kainstall.sh add --worker 192.168.77.134
+bash kainstall-centos.sh add --worker 192.168.77.134
 
 # 同时增加
-bash kainstall.sh add --master 192.168.77.135,192.168.77.136 --worker 192.168.77.137,192.168.77.138
+bash kainstall-centos.sh add --master 192.168.77.135,192.168.77.136 --worker 192.168.77.137,192.168.77.138
 ```
 
 ### 删除节点
@@ -238,19 +242,19 @@ bash kainstall.sh add --master 192.168.77.135,192.168.77.136 --worker 192.168.77
 
 ```bash
 # 删除单个master节点
-bash kainstall.sh del --master 192.168.77.135
+bash kainstall-centos.sh del --master 192.168.77.135
 
 # 删除单个worker节点
-bash kainstall.sh del --worker 192.168.77.134
+bash kainstall-centos.sh del --worker 192.168.77.134
 
 # 同时删除
-bash kainstall.sh del --master 192.168.77.135,192.168.77.136 --worker 192.168.77.137,192.168.77.138
+bash kainstall-centos.sh del --master 192.168.77.135,192.168.77.136 --worker 192.168.77.137,192.168.77.138
 ```
 
 ### 重置集群
 
 ```bash
-bash kainstall.sh reset \
+bash kainstall-centos.sh reset \
   --user root \
   --password 123456 \
   --port 22 \
@@ -263,34 +267,34 @@ bash kainstall.sh reset \
 
 ```bash
 # 添加 nginx ingress
-bash kainstall.sh add --ingress nginx
+bash kainstall-centos.sh add --ingress nginx
 
 # 添加 prometheus
-bash kainstall.sh add --monitor prometheus
+bash kainstall-centos.sh add --monitor prometheus
 
 # 添加 elasticsearch
-bash kainstall.sh add --log elasticsearch
+bash kainstall-centos.sh add --log elasticsearch
 
 # 添加 rook
-bash kainstall.sh add --storage rook
+bash kainstall-centos.sh add --storage rook
 
 # 添加 nodelocaldns
-bash kainstall.sh add --addon nodelocaldns
+bash kainstall-centos.sh add --addon nodelocaldns
 
 # 升级版本
-bash kainstall.sh upgrade --version 1.20.4
+bash kainstall-centos.sh upgrade --version 1.20.6
 
 # 重新颁发证书
-bash kainstall.sh renew-cert
+bash kainstall-centos.sh renew-cert
 
 # debug模式
-DEBUG=1 bash kainstall.sh
+DEBUG=1 bash kainstall-centos.sh
 
 # 更新脚本
-bash kainstall.sh update
+bash kainstall-centos.sh update
 
 # 使用 cri-o containerd runtime
-bash kainstall.sh init \
+bash kainstall-centos.sh init \
   --master 192.168.77.130,192.168.77.131,192.168.77.132 \
   --worker 192.168.77.133,192.168.77.134,192.168.77.135 \
   --user root \
@@ -298,7 +302,7 @@ bash kainstall.sh init \
   --cri containerd
   
 # 使用 cri-o cri runtime
-bash kainstall.sh init \
+bash kainstall-centos.sh init \
   --master 192.168.77.130,192.168.77.131,192.168.77.132 \
   --worker 192.168.77.133,192.168.77.134,192.168.77.135 \
   --user root \
@@ -375,7 +379,7 @@ SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
 1. 下载指定版本的离线包
 
     ```bash
-    wget http://kainstall.oss-cn-shanghai.aliyuncs.com/1.20.4/centos7.tgz
+    wget https://github.com/lework/kainstall-offline/releases/download/1.20.6/1.20.6_centos7.tgz
     ```
 
     > 更多离线包信息，见 [kainstall-offline](https://github.com/lework/kainstall-offline) 仓库
@@ -385,15 +389,15 @@ SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
     > 指定 `--offline-file` 参数。
 
     ```bash
-    bash kainstall.sh init \
+    bash kainstall-centos.sh init \
       --master 192.168.77.130,192.168.77.131,192.168.77.132 \
       --worker 192.168.77.133,192.168.77.134 \
       --user root \
       --password 123456 \
-      --version 1.20.4 \
+      --version 1.20.6 \
       --upgrade-kernel \
       --10years \
-      --offline-file centos7.tgz
+      --offline-file 1.20.6_centos7.tgz
     ```
 
 3. 添加节点
@@ -401,13 +405,13 @@ SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
     > 指定 --offline-file 参数。
 
     ```bash
-    bash kainstall.sh add \
+    bash kainstall-centos.sh add \
       --master 192.168.77.135 \
       --worker 192.168.77.136 \
       --user root \
       --password 123456 \
-      --version 1.20.4 \
-      --offline-file centos7.tgz
+      --version 1.20.6 \
+      --offline-file 1.20.6_centos7.tgz
     ```
 
 ### sudo 特权
@@ -417,7 +421,7 @@ SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
 ```bash
 useradd test
 passwd test --stdin <<< "12345678"
-echo 'test    ALL=(ALL)   ALL' >> /etc/sudoers
+echo 'test    ALL=(ALL)   NOPASSWD:ALL' >> /etc/sudoers
 ```
 
 sudo 参数
@@ -430,31 +434,31 @@ sudo 参数
 
 ```bash
 # 初始化
-bash kainstall.sh init \
+bash kainstall-centos.sh init \
   --master 192.168.77.130,192.168.77.131,192.168.77.132 \
   --worker 192.168.77.133,192.168.77.134 \
   --user test \
   --password 12345678 \
   --port 22 \
-  --version 1.20.4 \
+  --version 1.20.6 \
   --sudo \
   --sudo-user root \
   --sudo-password 12345678
 
 # 添加
-bash kainstall.sh add \
+bash kainstall-centos.sh add \
   --master 192.168.77.135 \
   --worker 192.168.77.136 \
   --user test \
   --password 12345678 \
   --port 22 \
-  --version 1.20.4 \
+  --version 1.20.6 \
   --sudo \
   --sudo-user root \
   --sudo-password 12345678
 
 # 更新脚本文件
-bash kainstall.sh update
+bash kainstall-centos.sh update
 ```
 
 ### 10年证书期限
@@ -469,23 +473,23 @@ bash kainstall.sh update
 
 ```bash
 # 初始化
-bash kainstall.sh init \
+bash kainstall-centos.sh init \
   --master 192.168.77.130,192.168.77.131,192.168.77.132 \
   --worker 192.168.77.133,192.168.77.134 \
   --user root \
   --password 123456 \
   --port 22 \
-  --version 1.20.4 \
+  --version 1.20.6 \
   --10years
   
 # 添加
-bash kainstall.sh add \
+bash kainstall-centos.sh add \
   --master 192.168.77.135 \
   --worker 192.168.77.136 \
   --user root \
   --password 123456 \
   --port 22 \
-  --version 1.20.4 \
+  --version 1.20.6 \
   --10years
 ```
 
