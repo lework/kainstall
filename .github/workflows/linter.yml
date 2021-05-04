@@ -41,6 +41,9 @@ jobs:
         with:
           # Full git history is needed to get a proper list of changed files within `super-linter`
           fetch-depth: 0
+      - name: Setup script executable
+        run: |
+          chmod +x *.sh
 
       ################################
       # Run Linter against code base #
