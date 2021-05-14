@@ -69,18 +69,18 @@ MEM: `4G`
 | common | [docker-ce](https://github.com/docker/docker-ce) | latest             | ![docker-ce release](https://img.shields.io/github/v/release/docker/docker-ce?sort=semver) |
 | common | [kubernetes](https://github.com/kubernetes/kubernetes) | latest             | ![kubernetes release](https://img.shields.io/github/v/release/kubernetes/kubernetes?sort=semver) |
 | network | [flannel](https://github.com/coreos/flannel) | 0.13.0            | ![flannel release](https://img.shields.io/github/v/release/coreos/flannel) |
-| network | [calico](https://github.com/projectcalico/calico) | 3.18.1 | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
-| network | [cilium](https://github.com/cilium/cilium) | 1.9.5 | ![cilium release ](https://img.shields.io/github/v/release/cilium/cilium?sort=semver) |
-| addons | [metrics server](https://github.com/kubernetes-sigs/metrics-server) | 0.4.2             | ![metrics-server release](https://img.shields.io/github/v/release/kubernetes-sigs/metrics-server) |
+| network | [calico](https://github.com/projectcalico/calico) | 3.19.0 | ![calico release ](https://img.shields.io/github/v/release/projectcalico/calico?sort=semver) |
+| network | [cilium](https://github.com/cilium/cilium) | 1.9.6 | ![cilium release ](https://img.shields.io/github/v/release/cilium/cilium?sort=semver) |
+| addons | [metrics server](https://github.com/kubernetes-sigs/metrics-server) | 0.4.4             | ![metrics-server release](https://img.shields.io/github/v/release/kubernetes-sigs/metrics-server) |
 | addons | [nodelocaldns](https://github.com/kubernetes/dns/tree/master/cmd/node-cache) | latest           | 1.17.0 |
-| ingress | [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.44.0          | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
-| ingress | [traefik](https://github.com/traefik/traefik) | 2.4.7          | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
-| monitor | [kube_prometheus](https://github.com/prometheus-operator/kube-prometheus) | 0.7.0             | ![kube-prometheus release](https://img.shields.io/github/v/release/prometheus-operator/kube-prometheus) |
-| log | [elasticsearch](https://github.com/elastic/elasticsearch) | 7.11.2            | ![elasticsearch release](https://img.shields.io/github/v/release/elastic/elasticsearch?sort=semver) |
-| storage | [rook](https://github.com/rook/rook) | 1.5.9 | ![rook release](https://img.shields.io/github/v/release/rook/rook?sort=semver) |
-| storage | [longhorn](https://github.com/longhorn/longhorn) | 1.1.0 | ![longhorn release](https://img.shields.io/github/v/release/longhorn/longhorn?sort=semver) |
+| ingress | [ingress nginx controller](https://github.com/kubernetes/ingress-nginx) | 0.46.0          | ![ingress-nginx release](https://img.shields.io/github/v/release/kubernetes/ingress-nginx?sort=semver) |
+| ingress | [traefik](https://github.com/traefik/traefik) | 2.4.8          | ![traefik release ](https://img.shields.io/github/v/release/traefik/traefik?sort=semver) |
+| monitor | [kube_prometheus](https://github.com/prometheus-operator/kube-prometheus) | 0.8.0             | ![kube-prometheus release](https://img.shields.io/github/v/release/prometheus-operator/kube-prometheus) |
+| log | [elasticsearch](https://github.com/elastic/elasticsearch) | 7.12.1          | ![elasticsearch release](https://img.shields.io/github/v/release/elastic/elasticsearch?sort=semver) |
+| storage | [rook](https://github.com/rook/rook) | 1.6.2 | ![rook release](https://img.shields.io/github/v/release/rook/rook?sort=semver) |
+| storage | [longhorn](https://github.com/longhorn/longhorn) | 1.1.1 | ![longhorn release](https://img.shields.io/github/v/release/longhorn/longhorn?sort=semver) |
 | ui | [kubernetes_dashboard](https://github.com/kubernetes/dashboard) | 2.2.0            | ![kubernetes dashboard release](https://img.shields.io/github/v/release/kubernetes/dashboard?sort=semver) |
-| ui | [kubesphere](https://github.com/kubesphere/kubesphere) | 3.0.0            | ![kubesphere release](https://img.shields.io/github/v/release/kubesphere/kubesphere?sort=semver) |
+| ui | [kubesphere](https://github.com/kubesphere/kubesphere) | 3.1.0            | ![kubesphere release](https://img.shields.io/github/v/release/kubesphere/kubesphere?sort=semver) |
 
 除 **kube组件** 版本可以通过参数(`--version`) 指定外，其他的软件版本需在脚本中指定。
 
@@ -318,24 +318,24 @@ bash kainstall-centos.sh init \
 # 版本
 KUBE_VERSION="${KUBE_VERSION:-latest}"
 FLANNEL_VERSION="${FLANNEL_VERSION:-0.13.0}"
-METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.4.2}"
-INGRESS_NGINX="${INGRESS_NGINX:-0.44.0}"
-TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.4.5}"
-CALICO_VERSION="${CALICO_VERSION:-3.18.0}"
-CILIUM_VERSION="${CILIUM_VERSION:-1.9.5}"
-KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.7.0}"
-ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.11.1}"
-ROOK_VERSION="${ROOK_VERSION:-1.5.7}"
-LONGHORN_VERSION="${LONGHORN_VERSION:-1.1.0}"
+METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.4.4}"
+INGRESS_NGINX="${INGRESS_NGINX:-0.46.0}"
+TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.4.8}"
+CALICO_VERSION="${CALICO_VERSION:-3.19.0}"
+CILIUM_VERSION="${CILIUM_VERSION:-1.9.6}"
+KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.8.0}"
+ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.12.1}"
+ROOK_VERSION="${ROOK_VERSION:-1.6.2}"
+LONGHORN_VERSION="${LONGHORN_VERSION:-1.1.1}"
 KUBERNETES_DASHBOARD_VERSION="${KUBERNETES_DASHBOARD_VERSION:-2.2.0}"
-KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.0.0}" 
+KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.1.0}"
 
 # 集群配置
 KUBE_DNSDOMAIN="${KUBE_DNSDOMAIN:-cluster.local}"
 KUBE_APISERVER="${KUBE_APISERVER:-apiserver.$KUBE_DNSDOMAIN}"
 KUBE_POD_SUBNET="${KUBE_POD_SUBNET:-10.244.0.0/16}"
 KUBE_SERVICE_SUBNET="${KUBE_SERVICE_SUBNET:-10.96.0.0/16}"
-KUBE_IMAGE_REPO="${KUBE_IMAGE_REPO:-registry.aliyuncs.com/k8sxio}"
+KUBE_IMAGE_REPO="${KUBE_IMAGE_REPO:-registry.cn-hangzhou.aliyuncs.com/kainstall}"
 KUBE_NETWORK="${KUBE_NETWORK:-flannel}"
 KUBE_INGRESS="${KUBE_INGRESS:-nginx}"
 KUBE_MONITOR="${KUBE_MONITOR:-prometheus}"

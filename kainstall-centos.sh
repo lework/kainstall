@@ -21,17 +21,17 @@ set -o pipefail         # Use last non-zero exit code in a pipeline
 # 版本
 KUBE_VERSION="${KUBE_VERSION:-latest}"
 FLANNEL_VERSION="${FLANNEL_VERSION:-0.13.0}"
-METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.4.2}"
-INGRESS_NGINX="${INGRESS_NGINX:-0.44.0}"
-TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.4.7}"
-CALICO_VERSION="${CALICO_VERSION:-3.18.1}"
-CILIUM_VERSION="${CILIUM_VERSION:-1.9.5}"
-KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.7.0}"
-ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.11.2}"
-ROOK_VERSION="${ROOK_VERSION:-1.5.9}"
-LONGHORN_VERSION="${LONGHORN_VERSION:-1.1.0}"
+METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.4.4}"
+INGRESS_NGINX="${INGRESS_NGINX:-0.46.0}"
+TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.4.8}"
+CALICO_VERSION="${CALICO_VERSION:-3.19.0}"
+CILIUM_VERSION="${CILIUM_VERSION:-1.9.6}"
+KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.8.0}"
+ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.12.1}"
+ROOK_VERSION="${ROOK_VERSION:-1.6.2}"
+LONGHORN_VERSION="${LONGHORN_VERSION:-1.1.1}"
 KUBERNETES_DASHBOARD_VERSION="${KUBERNETES_DASHBOARD_VERSION:-2.2.0}"
-KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.0.0}"
+KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.1.0}"
 
 # 集群配置
 KUBE_DNSDOMAIN="${KUBE_DNSDOMAIN:-cluster.local}"
@@ -3643,7 +3643,8 @@ function update::self {
   
   log::info "[update]" "download kainstall script to $0"
   command::exec "127.0.0.1" "
-    wget --timeout=10 --waitretry=3 --tries=5 --retry-connrefused https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall.sh -O \"$0\"
+    wget --timeout=10 --waitretry=3 --tries=5 --retry-connrefused https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall-centos.sh -O /tmp/kainstall-centos.sh || exit 1
+    /bin/mv -fv /tmp/kainstall-centos.sh \"$0\"
     chmod +x \"$0\"
   "
   check::exit_code "$?" "update" "kainstall script"
