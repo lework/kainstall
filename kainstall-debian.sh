@@ -1572,7 +1572,7 @@ function init::node_config() {
     # set audit-policy
     log::info "[init]" "$host: set audit-policy file."
     command::exec "${host}" "
-    [ ! -d etc/kubernetes ] && mkdir -p /etc/kubernetes
+      [ ! -d etc/kubernetes ] && mkdir -p /etc/kubernetes
       cat << EOF > /etc/kubernetes/audit-policy.yaml
 # Log all requests at the Metadata level.
 apiVersion: audit.k8s.io/v1
@@ -1710,12 +1710,7 @@ function kubeadm::init() {
 ---
 apiVersion: kubeadm.k8s.io/v1beta2
 kind: InitConfiguration
-nodeRegistration:
-  # cri 配置
-  criSocket: ${KUBE_CRI_ENDPOINT:-/var/run/dockershim.sock}
-  kubeletExtraArgs:
-    runtime-cgroups: /system.slice/${KUBE_CRI//-/}.service
-    pod-infra-container-image: $KUBE_IMAGE_REPO/pause:3.2
+${kubelet_nodeRegistration}
 ---
 apiVersion: kubeproxy.config.k8s.io/v1alpha1
 kind: KubeProxyConfiguration
@@ -1909,11 +1904,7 @@ discovery:
   timeout: 5m0s
 controlPlane:
   certificateKey: ${INTI_CERTKEY:-}
-nodeRegistration:
-  criSocket: ${KUBE_CRI_ENDPOINT:-/var/run/dockershim.sock}
-  kubeletExtraArgs:
-    runtime-cgroups: /system.slice/${KUBE_CRI//-/}.service
-    pod-infra-container-image: $KUBE_IMAGE_REPO/pause:3.2
+${kubelet_nodeRegistration}
 EOF
       kubeadm join --config /etc/kubernetes/kubeadmcfg.yaml
     "
@@ -1947,11 +1938,7 @@ discovery:
     - sha256:${CACRT_HASH:-}
     token: ${INIT_TOKEN}
   timeout: 5m0s
-nodeRegistration:
-  criSocket: ${KUBE_CRI_ENDPOINT:-/var/run/dockershim.sock}
-  kubeletExtraArgs:
-    runtime-cgroups: /system.slice/${KUBE_CRI//-/}.service
-    pod-infra-container-image: $KUBE_IMAGE_REPO/pause:3.2
+${kubelet_nodeRegistration}
 EOF
       kubeadm join --config /etc/kubernetes/kubeadmcfg.yaml
     "
@@ -3653,6 +3640,17 @@ function transform::data {
   [[ "$KUBE_CRI" != "docker" && "${OFFLINE_TAG:-}" == "1" ]] && { log::error "[limit]" "$KUBE_CRI is not supported offline, only docker"; exit 1; }
   [[ "$KUBE_CRI" == "containerd" && "${KUBE_CRI_ENDPOINT}" == "/var/run/dockershim.sock" ]] && KUBE_CRI_ENDPOINT="unix:///run/containerd/containerd.sock"
   [[ "$KUBE_CRI" == "cri-o" && "${KUBE_CRI_ENDPOINT}" == "/var/run/dockershim.sock"  ]] && KUBE_CRI_ENDPOINT="unix:///var/run/crio/crio.sock"
+
+  kubelet_nodeRegistration="nodeRegistration:
+  criSocket: ${KUBE_CRI_ENDPOINT:-/var/run/dockershim.sock}
+  kubeletExtraArgs:
+    runtime-cgroups: /system.slice/${KUBE_CRI//-/}.service
+$(if [[ "${KUBE_VERSION}" == "latest" || "${KUBE_VERSION}" == *"1.21"* ]]; then
+echo "    pod-infra-container-image: $KUBE_IMAGE_REPO/pause:3.4.1"
+else
+echo "    pod-infra-container-image: $KUBE_IMAGE_REPO/pause:3.2"
+fi)
+"
 }
 
 
