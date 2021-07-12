@@ -317,8 +317,10 @@ function script::init_node() {
   sed -ri '/^[^#]*swap/s@^@#@' /etc/fstab
 
   # Disable firewalld
-  systemctl stop firewalld
-  systemctl disable firewalld
+  for target in firewalld python-firewall firewalld-filesystem iptables; do
+    systemctl stop $target &>/dev/null || true
+    systemctl disable $target &>/dev/null || true
+  done
 
   # repo
   [ ! -f /etc/apt/sources.list_bak ] && cp /etc/apt/sources.list{,_bak}
@@ -1241,16 +1243,17 @@ function check::kernel() {
   # 检查os kernel 版本
 
   local version=${1:-}
-  
   log::info "[check]" "kernel version not less than ${version}"
+  version=$(echo "${version}" | awk -F. '{ printf("%d%03d%03d\n", $1,$2,$3); }')
+
   for host in $MASTER_NODES $WORKER_NODES
   do
     command::exec "${host}" "
       kernel_version=\$(uname -r)
-      kernel_version=\${kernel_version/-*}
+      kernel_version=\$(echo \${kernel_version/-*} | awk -F. '{ printf(\"%d%03d%03d\n\", \$1,\$2,\$3); }') 
       echo kernel_version \${kernel_version}
-      [[ \${kernel_version//.} -ge ${version//.} ]] && exit 0 || exit 1
-    "
+      [[ \${kernel_version} -ge ${version} ]] && exit 0 || exit 1
+    "                                                                                                                                                 
     check::exit_code "$?" "check" "$host kernel version" "exit"
   done
 
@@ -3380,6 +3383,10 @@ function offline::load() {
     if [[ "${UPGRADE_KERNEL_TAG:-}" != "1" ]]; then
       command::exec "${host}" "
         set -e
+        for target in firewalld python-firewall firewalld-filesystem iptables; do
+          systemctl stop \$target &>/dev/null || true
+          systemctl disable \$target &>/dev/null || true
+        done
         systemctl start docker && \
         cd ${OFFLINE_DIR} && \
         gzip -d -c ${1}.tgz | docker load && gzip -d -c all.tgz | docker load
