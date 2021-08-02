@@ -12,7 +12,7 @@
 
 ## 要求
 
-OS: `centos 7.x x64` , `centos 8.x x64`,  `debian 9.x x64` , `debian 10.x x64`
+OS: `centos 7.x x64` , `centos 8.x x64`,  `debian 9.x x64` , `debian 10.x x64`, `ubuntu 20.04 x64`, `ubuntu 20.10 x64`, `ubuntu 21.04 x64`
 
 CPU: `2C`
 
@@ -96,6 +96,9 @@ wget https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall-centos.sh
 
 # debian
 wget https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall-debian.sh
+
+# ubuntu
+wget https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall-ubuntu.sh
 ```
 
 ### 帮助信息
