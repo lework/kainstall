@@ -2143,7 +2143,7 @@ function add::ingress() {
     kube::apply "traefik" """
 ---
 kind: ClusterRole
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 metadata:
   name: ingress-traefik-controller
 rules:
@@ -2175,7 +2175,7 @@ rules:
       - update
 ---
 kind: ClusterRoleBinding
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 metadata:
   name: ingress-traefik-controller
 roleRef:
@@ -2391,7 +2391,7 @@ spec:
       port: 80
       targetPort: 80
 ---
-apiVersion: networking.k8s.io/v1beta1
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: ingress-demo-app
@@ -2403,9 +2403,12 @@ spec:
     http:
       paths:
       - path: /
+        pathType: Prefix
         backend:
-          serviceName: ingress-demo-app
-          servicePort: 80
+          service:
+            name: ingress-demo-app
+            port:
+              number: 80
 """
     # shellcheck disable=SC2181
     if [[ "$?" == "0" ]]; then
@@ -2489,7 +2492,7 @@ function add::network() {
     log::info "[monitor]" "add hubble-ui ingress"
     kube::apply "hubble-ui ingress" "
 ---
-apiVersion: networking.k8s.io/v1beta1
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: hubble-ui
@@ -2501,9 +2504,13 @@ spec:
   - host: hubble-ui.cluster.local
     http:
       paths:
-      - backend:
-          serviceName: hubble-ui
-          servicePort: 80
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: hubble-ui
+            port:
+              number: 80
     "
     # shellcheck disable=SC2181
     if [[ "$?" == "0" ]]; then                                                                                                                                            
@@ -2527,7 +2534,7 @@ function add::addon() {
     command::exec "${MGMT_NODE}" "
       sed -i -e 's#k8s.gcr.io/metrics-server#$KUBE_IMAGE_REPO#g' \
              -e '/--kubelet-preferred-address-types=.*/d' \
-             -e 's/\\(.*\\)- --secure-port=4443/\\1- --secure-port=4443\\n\\1- --kubelet-insecure-tls\\n\\1- --kubelet-preferred-address-types=InternalIP,InternalDNS,ExternalIP,ExternalDNS,Hostname/g' \
+             -e 's/\\(.*\\)- --secure-port=\\(.*\\)/\\1- --secure-port=\\2\\n\\1- --kubelet-insecure-tls\\n\\1- --kubelet-preferred-address-types=InternalIP,InternalDNS,ExternalIP,ExternalDNS,Hostname/g' \
              \"${metrics_server_file}\"
     "
     check::exit_code "$?" "addon" "change metrics-server parameter"
@@ -2615,7 +2622,7 @@ spec:
     log::info "[monitor]" "add prometheus ingress"
     kube::apply "prometheus ingress" "
 ---
-apiVersion: networking.k8s.io/v1beta1
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: grafana
@@ -2627,11 +2634,15 @@ spec:
   - host: grafana.monitoring.cluster.local
     http:
       paths:
-      - backend:
-          serviceName: grafana
-          servicePort: 3000
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: grafana
+            port:
+              number: 3000
 ---
-apiVersion: networking.k8s.io/v1beta1
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: prometheus
@@ -2643,11 +2654,15 @@ spec:
   - host: prometheus.monitoring.cluster.local
     http:
       paths:
-      - backend:
-          serviceName: prometheus-k8s
-          servicePort: 9090
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: prometheus-k8s
+            port:
+              number: 9090
 ---
-apiVersion: networking.k8s.io/v1beta1
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: alertmanager
@@ -2659,9 +2674,13 @@ spec:
   - host: alertmanager.monitoring.cluster.local
     http:
       paths:
-      - backend:
-          serviceName: alertmanager-main
-          servicePort: 9093
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: alertmanager-main
+            port:
+              number: 9093
     "
     # shellcheck disable=SC2181
     if [[ "$?" == "0" ]]; then
@@ -2778,7 +2797,7 @@ spec:
         securityContext:
           privileged: true
 ---
-apiVersion: networking.k8s.io/v1beta1
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: elasticsearch
@@ -2790,9 +2809,13 @@ spec:
   - host: elasticsearch.logging.cluster.local
     http:
       paths:
-      - backend:
-          serviceName: elasticsearch
-          servicePort: 9200
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: elasticsearch
+            port:
+              number: 9200
 ---
 apiVersion: v1
 kind: Service
@@ -2839,7 +2862,7 @@ spec:
         ports:
         - containerPort: 5601
 ---
-apiVersion: networking.k8s.io/v1beta1
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: kibana
@@ -2851,9 +2874,13 @@ spec:
   - host: kibana.logging.cluster.local
     http:
       paths:
-      - backend:
-          serviceName: kibana
-          servicePort: 5601
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kibana
+            port:
+              number: 5601
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -3015,7 +3042,7 @@ function add::storage() {
     
     kube::apply "longhorn ingress" "
 ---
-apiVersion: networking.k8s.io/v1beta1
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: longhorn-ingress
@@ -3026,9 +3053,12 @@ spec:
     http:
       paths:
       - path: /
+        pathType: Prefix
         backend:
-          serviceName: longhorn-frontend
-          servicePort: 80
+          service:
+            name: longhorn-frontend
+            port:
+              number: 80
     "
     # shellcheck disable=SC2181
     if [[ "$?" == "0" ]]; then
@@ -3051,7 +3081,7 @@ function add::ui() {
     kube::apply "${dashboard_file}"
     kube::apply "kubernetes dashboard ingress" "
 ---
-apiVersion: networking.k8s.io/v1beta1
+apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   annotations:
@@ -3091,9 +3121,12 @@ fi
     http:
       paths:
       - path: /
+        pathType: Prefix
         backend:
-          serviceName: kubernetes-dashboard
-          servicePort: 443
+          service:
+            name: kubernetes-dashboard
+            port:
+              number: 443
     "
     # shellcheck disable=SC2181
     if [[ "$?" == "0" ]]; then
@@ -3174,7 +3207,7 @@ function add::ops() {
   [[ "${master_num:-0}" == "0" ]] && master_num=1
   kube::apply "etcd-snapshot" """
 ---
-apiVersion: batch/v1beta1
+apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: etcd-snapshot
