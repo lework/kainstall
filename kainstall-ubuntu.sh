@@ -3208,7 +3208,7 @@ function add::ops() {
   [[ "${master_num:-0}" == "0" ]] && master_num=1
   kube::apply "etcd-snapshot" """
 ---
-apiVersion: batch/v1
+apiVersion: batch/v1beta1
 kind: CronJob
 metadata:
   name: etcd-snapshot
