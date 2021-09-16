@@ -782,11 +782,13 @@ makestep 1.0 3
 logdir /var/log/chrony
 EOF
 
+  timedatectl set-timezone Asia/Shanghai
   chronyd -q -t 1 'server cn.pool.ntp.org iburst maxsamples 1'
-  systemctl enable chronyd
-  systemctl start chronyd
+  systemctl enable chrony
+  systemctl start chrony
   chronyc sources -v
   chronyc sourcestats
+  hwclock --systohc
 
   # package
   [[ "${OFFLINE_TAG:-}" != "1" ]] && apt-get install -y apt-transport-https ca-certificates curl wget gnupg lsb-release
@@ -2430,8 +2432,9 @@ function add::network() {
     utils::download_file "https://cdn.jsdelivr.net/gh/coreos/flannel@v${FLANNEL_VERSION}/Documentation/kube-flannel.yml" "${flannel_file}"
     
     command::exec "${MGMT_NODE}" "
-      sed -i 's#10.244.0.0/16#$KUBE_POD_SUBNET#g' \"${flannel_file}\"
-      sed -i 's#\"Type\": \"vxlan\"#\"Type\": \"${KUBE_FLANNEL_TYPE}\"#g' \"${flannel_file}\"
+      sed -i -e 's#10.244.0.0/16#${KUBE_POD_SUBNET}#g' \
+             -e 's#quay.io/coreos#${KUBE_IMAGE_REPO}#g' \
+             -e 's#\"Type\": \"vxlan\"#\"Type\": \"${KUBE_FLANNEL_TYPE}\"#g' \"${flannel_file}\"
       if [[ \"${KUBE_FLANNEL_TYPE}\" == \"vxlan\" ]]; then
         sed -i 's#\"Type\": \"vxlan\"#\"Type\": \"vxlan\", \"DirectRouting\": true#g' \"${flannel_file}\"
       fi
