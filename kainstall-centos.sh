@@ -363,6 +363,7 @@ EOF
 DefaultLimitCORE=infinity
 DefaultLimitNOFILE=655360
 DefaultLimitNPROC=655360
+DefaultTasksMax=75%
 ## Kainstall managed end
 EOF
 
