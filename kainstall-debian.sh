@@ -819,6 +819,10 @@ cat << EOF >> /etc/audit/rules.d/audit.rules
 # Ignore errors
 -i
 
+# SYSCALL
+-a always,exit -F arch=b64 -S kill,tkill,tgkill -F a1=9 -F key=trace_kill_9
+-a always,exit -F arch=b64 -S kill,tkill,tgkill -F a1=15 -F key=trace_kill_15
+
 # docker
 -w /usr/bin/dockerd -k docker
 -w /var/lib/docker -k docker
