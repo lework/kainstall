@@ -82,6 +82,7 @@ OS_SUPPORT="centos7 centos8"
 GITHUB_PROXY="${GITHUB_PROXY:-https://gh.lework.workers.dev/}"
 GCR_PROXY="${GCR_PROXY:-k8sgcr.lework.workers.dev}"
 SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
+SKIP_SET_OS_REPO=${SKIP_SET_OS_REPO:-false}
 
 trap trap::info 1 2 3 15 EXIT
 
@@ -323,14 +324,14 @@ function script::init_node() {
   done
 
   # repo
-  [ -f /etc/yum.repos.d/CentOS-Base.repo ] && sed -e 's!^#baseurl=!baseurl=!g' \
+  [[ -f /etc/yum.repos.d/CentOS-Base.repo && "${SKIP_SET_OS_REPO,,}" == "false" ]] && sed -e 's!^#baseurl=!baseurl=!g' \
     -e 's!^mirrorlist=!#mirrorlist=!g' \
     -e 's!mirror.centos.org!mirrors.aliyun.com!g' \
     -i /etc/yum.repos.d/CentOS-Base.repo
   
-  [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y epel-release
+  [[ "${OFFLINE_TAG:-}" != "1" && "${SKIP_SET_OS_REPO,,}" == "false" ]] && yum install -y epel-release
   
-  [ -f /etc/yum.repos.d/epel.repo ] && sed -e 's!^mirrorlist=!#mirrorlist=!g' \
+  [[ -f /etc/yum.repos.d/epel.repo && "${SKIP_SET_OS_REPO,,}" == "false" ]] && sed -e 's!^mirrorlist=!#mirrorlist=!g' \
     -e 's!^metalink=!#metalink=!g' \
     -e 's!^#baseurl=!baseurl=!g' \
     -e 's!//download.*/pub!//mirrors.aliyun.com!g' \
@@ -1578,7 +1579,7 @@ function init::node_config() {
   do
     log::info "[init]" "master: $host"
     command::exec "${host}" "
-      export OFFLINE_TAG=${OFFLINE_TAG:-0} KUBE_APISERVER=${KUBE_APISERVER}
+      export OFFLINE_TAG=${OFFLINE_TAG:-0} KUBE_APISERVER=${KUBE_APISERVER} SKIP_SET_OS_REPO=${SKIP_SET_OS_REPO:-false}
       $(declare -f script::init_node)
       script::init_node
    "
@@ -1612,7 +1613,7 @@ EOF
   do
     log::info "[init]" "worker: $host"
     command::exec "${host}" "
-      export OFFLINE_TAG=${OFFLINE_TAG:-0} KUBE_APISERVER=${KUBE_APISERVER}
+      export OFFLINE_TAG=${OFFLINE_TAG:-0} KUBE_APISERVER=${KUBE_APISERVER} SKIP_SET_OS_REPO=${SKIP_SET_OS_REPO:-false}
       $(declare -f script::init_node)
       script::init_node
     "

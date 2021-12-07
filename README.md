@@ -372,6 +372,7 @@ HOSTNAME_PREFIX="${HOSTNAME_PREFIX:-k8s}"
 GITHUB_PROXY="${GITHUB_PROXY:-https://gh.lework.workers.dev/}"
 GCR_PROXY="${GCR_PROXY:-k8sgcr.lework.workers.dev}"
 SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
+SKIP_SET_OS_REPO=${SKIP_SET_OS_REPO:-false}
 ```
 
 ### 离线部署

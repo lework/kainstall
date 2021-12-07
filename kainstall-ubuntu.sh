@@ -82,6 +82,7 @@ OS_SUPPORT="ubuntu20.04 ubuntu20.10 ubuntu21.04"
 GITHUB_PROXY="${GITHUB_PROXY:-https://gh.lework.workers.dev/}"
 GCR_PROXY="${GCR_PROXY:-k8sgcr.lework.workers.dev}"
 SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
+SKIP_SET_OS_REPO=${SKIP_SET_OS_REPO:-false}
 
 trap trap::info 1 2 3 15 EXIT
 
@@ -323,10 +324,9 @@ function script::init_node() {
   done
 
   # repo
-  [ ! -f /etc/apt/sources.list_bak ] && cp /etc/apt/sources.list{,_bak}
-  mv /etc/apt/sources.list{,.bak}
   local codename; codename="$(awk -F'=' '/UBUNTU_CODENAME/ {print $2}' /etc/os-release)"
-  cat << EOF > /etc/apt/sources.list
+  [[ "${SKIP_SET_OS_REPO,,}" == "false" ]] && cp -fv /etc/apt/sources.list{,.bak}
+  [[ "${SKIP_SET_OS_REPO,,}" == "false" ]] && cat << EOF > /etc/apt/sources.list
 deb http://mirrors.aliyun.com/ubuntu/ ${codename} main restricted universe multiverse
 deb http://mirrors.aliyun.com/ubuntu/ ${codename}-security main restricted universe multiverse
 deb http://mirrors.aliyun.com/ubuntu/ ${codename}-updates main restricted universe multiverse
@@ -1567,7 +1567,7 @@ function init::node_config() {
   do
     log::info "[init]" "master: $host"
     command::exec "${host}" "
-      export OFFLINE_TAG=${OFFLINE_TAG:-0} KUBE_APISERVER=${KUBE_APISERVER}
+      export OFFLINE_TAG=${OFFLINE_TAG:-0} KUBE_APISERVER=${KUBE_APISERVER} SKIP_SET_OS_REPO=${SKIP_SET_OS_REPO:-false}
       $(declare -f script::init_node)
       script::init_node
    "
@@ -1601,7 +1601,7 @@ EOF
   do
     log::info "[init]" "worker: $host"
     command::exec "${host}" "
-      export OFFLINE_TAG=${OFFLINE_TAG:-0} KUBE_APISERVER=${KUBE_APISERVER}
+      export OFFLINE_TAG=${OFFLINE_TAG:-0} KUBE_APISERVER=${KUBE_APISERVER} SKIP_SET_OS_REPO=${SKIP_SET_OS_REPO:-false}
       $(declare -f script::init_node)
       script::init_node
     "
