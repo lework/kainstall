@@ -1862,10 +1862,10 @@ EOF
      mkdir -p \$HOME/.kube
      sudo cp -f /etc/kubernetes/admin.conf \$HOME/.kube/config
   "
-  check::exit_code "$?" "kubeadm init" "${MGMT_NODE}: set kube config"
+  check::exit_code "$?" "kubeadm init" "${MGMT_NODE}: set kube config" "exit"
   if [[ "$(echo "$MASTER_NODES" | wc -w)" == "1" ]]; then
     log::info "[kubeadm init]" "${MGMT_NODE}: delete master taint"
-    command::exec "127.0.0.1" "kubectl taint nodes --all node-role.kubernetes.io/master-"
+    command::exec "$MASTER_NODES" "kubectl taint nodes --all node-role.kubernetes.io/master-"
     check::exit_code "$?" "kubeadm init" "${MGMT_NODE}: delete master taint"
   fi
 
@@ -1874,7 +1874,7 @@ EOF
     kubectl create clusterrolebinding node-client-auto-renew-crt --clusterrole=system:certificates.k8s.io:certificatesigningrequests:selfnodeclient --group=system:nodes
     kubectl create clusterrolebinding node-server-auto-renew-crt --clusterrole=system:certificates.k8s.io:certificatesigningrequests:selfnodeserver --group=system:nodes
   "
-  check::exit_code "$?" "kubeadm init" "Auto-Approve kubelet cert csr"
+  check::exit_code "$?" "kubeadm init" "Auto-Approve kubelet cert csr" "exit"
 }
 
 
@@ -1926,7 +1926,7 @@ EOF
       mkdir -p \$HOME/.kube
       sudo cp -f /etc/kubernetes/admin.conf \$HOME/.kube/config
     "
-    check::exit_code "$?" "kubeadm join" "$host: set kube config"
+    check::exit_code "$?" "kubeadm join" "$host: set kube config" "exit"
     
     command::exec "${host}" "
       sed -i 's#.*$KUBE_APISERVER#127.0.0.1 $KUBE_APISERVER#g' /etc/hosts
@@ -2750,9 +2750,18 @@ spec:
       labels:
         app: elasticsearch
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - {key: app,operator: In,values: [\"elasticsearch\"]}
+              topologyKey: kubernetes.io/hostname
       containers:
       - name: elasticsearch
-        image: docker.elastic.co/elasticsearch/elasticsearch:${ELASTICSEARCH_VERSION}
+        image: ${KUBE_IMAGE_REPO}/elasticsearch:${ELASTICSEARCH_VERSION}
         resources:
             limits:
               cpu: 1000m
@@ -2779,6 +2788,8 @@ spec:
             value: 'es-cluster-0.elasticsearch,es-cluster-1.elasticsearch,es-cluster-2.elasticsearch'
           - name: cluster.initial_master_nodes
             value: 'es-cluster-0,es-cluster-1,es-cluster-2'
+          - name: discovery.zen.minimum_master_nodes
+            value: '2'
           - name: ES_JAVA_OPTS
             value: '-Xms512m -Xmx512m'
       volumes:
@@ -2859,7 +2870,7 @@ spec:
     spec:
       containers:
       - name: kibana
-        image: docker.elastic.co/kibana/kibana:${ELASTICSEARCH_VERSION}
+        image: ${KUBE_IMAGE_REPO}/kibana:${ELASTICSEARCH_VERSION}
         resources:
           limits:
             cpu: 1000m
@@ -2952,7 +2963,7 @@ spec:
         effect: NoSchedule
       containers:
       - name: fluentd
-        image: fluent/fluentd-kubernetes-daemonset:v1.11.5-debian-elasticsearch7-1.0
+        image: fluent/fluentd-kubernetes-daemonset:v1.14.3-debian-elasticsearch7-1.0
         env:
           - name:  FLUENT_ELASTICSEARCH_HOST
             value: elasticsearch.kube-logging.svc.${KUBE_DNSDOMAIN}
