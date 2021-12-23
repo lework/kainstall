@@ -22,16 +22,16 @@ set -o pipefail         # Use last non-zero exit code in a pipeline
 KUBE_VERSION="${KUBE_VERSION:-latest}"
 FLANNEL_VERSION="${FLANNEL_VERSION:-0.15.1}"
 METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.5.2}"
-INGRESS_NGINX="${INGRESS_NGINX:-1.0.5}"
-TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.5.4}"
-CALICO_VERSION="${CALICO_VERSION:-3.21.0}"
-CILIUM_VERSION="${CILIUM_VERSION:-1.10.5}"
+INGRESS_NGINX="${INGRESS_NGINX:-1.1.0}"
+TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.5.6}"
+CALICO_VERSION="${CALICO_VERSION:-3.21.2}"
+CILIUM_VERSION="${CILIUM_VERSION:-1.9.11}"
 KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.9.0}"
-ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.15.2}"
-ROOK_VERSION="${ROOK_VERSION:-1.7.8}"
-LONGHORN_VERSION="${LONGHORN_VERSION:-1.2.2}"
+ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.16.2}"
+ROOK_VERSION="${ROOK_VERSION:-1.8.1}"
+LONGHORN_VERSION="${LONGHORN_VERSION:-1.2.3}"
 KUBERNETES_DASHBOARD_VERSION="${KUBERNETES_DASHBOARD_VERSION:-2.4.0}"
-KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.2.0}"
+KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.2.1}"
 
 # 集群配置
 KUBE_DNSDOMAIN="${KUBE_DNSDOMAIN:-cluster.local}"
@@ -1717,6 +1717,7 @@ function kubeadm::init() {
   log::info "[kubeadm init]" "kubeadm init on ${MGMT_NODE}"
   log::info "[kubeadm init]" "${MGMT_NODE}: set kubeadmcfg.yaml"
   command::exec "${MGMT_NODE}" "
+    PAUSE_VERSION=$(kubeadm config images list 2>/dev/null | awk -F: '/pause/ {print $2}')
     cat << EOF > /etc/kubernetes/kubeadmcfg.yaml
 ---
 apiVersion: kubeadm.k8s.io/v1beta2
@@ -1896,6 +1897,11 @@ function kubeadm::join() {
     kubeadm token create
   "
   get::command_output "INIT_TOKEN" "$?" "exit"
+
+  command::exec "${MGMT_NODE}" "
+    kubeadm config images list 2>/dev/null | awk -F: '/pause/ {print \$2}'
+  "
+  get::command_output "PAUSE_VERSION" "$?"
 
   for host in $MASTER_NODES
   do
@@ -3705,11 +3711,7 @@ function transform::data {
   criSocket: ${KUBE_CRI_ENDPOINT:-/var/run/dockershim.sock}
   kubeletExtraArgs:
     runtime-cgroups: /system.slice/${KUBE_CRI//-/}.service
-$(if [[ "${KUBE_VERSION}" == "latest" || "${KUBE_VERSION}" == *"1.21"* ]]; then
-echo "    pod-infra-container-image: $KUBE_IMAGE_REPO/pause:3.4.1"
-else
-echo "    pod-infra-container-image: $KUBE_IMAGE_REPO/pause:3.2"
-fi)
+    pod-infra-container-image: ${KUBE_IMAGE_REPO}/pause:${PAUSE_VERSION:-3.6}
 "
 }
 
