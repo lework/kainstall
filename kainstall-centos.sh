@@ -1787,8 +1787,6 @@ kubeReservedCgroup: /kube.slice
 systemReservedCgroup: /system.slice
 enforceNodeAllocatable: 
 - pods
-- kube-reserved
-- system-reserved
 
 ---
 apiVersion: kubeadm.k8s.io/v1beta2
