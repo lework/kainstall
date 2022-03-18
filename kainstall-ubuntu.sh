@@ -20,17 +20,17 @@ set -o pipefail         # Use last non-zero exit code in a pipeline
 
 # 版本
 KUBE_VERSION="${KUBE_VERSION:-latest}"
-FLANNEL_VERSION="${FLANNEL_VERSION:-0.15.1}"
-METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.5.2}"
-INGRESS_NGINX="${INGRESS_NGINX:-1.1.0}"
-TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.5.6}"
-CALICO_VERSION="${CALICO_VERSION:-3.21.2}"
-CILIUM_VERSION="${CILIUM_VERSION:-1.9.11}"
-KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.9.0}"
-ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-7.16.2}"
-ROOK_VERSION="${ROOK_VERSION:-1.8.1}"
-LONGHORN_VERSION="${LONGHORN_VERSION:-1.2.3}"
-KUBERNETES_DASHBOARD_VERSION="${KUBERNETES_DASHBOARD_VERSION:-2.4.0}"
+FLANNEL_VERSION="${FLANNEL_VERSION:-0.17.0}"
+METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.6.1}"
+INGRESS_NGINX="${INGRESS_NGINX:-1.1.2}"
+TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.6.1}"
+CALICO_VERSION="${CALICO_VERSION:-3.22.1}"
+CILIUM_VERSION="${CILIUM_VERSION:-1.9.13}"
+KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.10.0}"
+ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-8.1.0}"
+ROOK_VERSION="${ROOK_VERSION:-1.8.7}"
+LONGHORN_VERSION="${LONGHORN_VERSION:-1.2.4}"
+KUBERNETES_DASHBOARD_VERSION="${KUBERNETES_DASHBOARD_VERSION:-2.5.1}"
 KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.2.1}"
 
 # 集群配置
@@ -198,9 +198,9 @@ function utils::download_file() {
     set -e
     if [ ! -f \"${dest}\" ]; then
       [ ! -d \"${dest_dirname}\" ] && mkdir -pv \"${dest_dirname}\" 
-      wget --timeout=10 --waitretry=3 --tries=5 --retry-connrefused \"${url}\" -O \"${dest}\"
+      wget --timeout=10 --waitretry=3 --tries=5 --retry-connrefused --no-check-certificate \"${url}\" -O \"${dest}\"
       if [[ \"${unzip_tag}\" == \"unzip\" ]]; then
-        command -v unzip 2>/dev/null || apt-get install -y unzip
+        command -v unzip 2>/dev/null || yum install -y unzip
         unzip -o \"${dest}\" -d \"${dest_dirname}\"
       fi
     else
@@ -208,7 +208,7 @@ function utils::download_file() {
     fi
   "
   local status="$?"
-  check::exit_code "$status" "download" "${filename}"
+  check::exit_code "$status" "download" "${filename}" "exit"
   return "$status"
 }
 
@@ -1013,8 +1013,8 @@ function script::install_containerd() {
 
   containerd config default > /etc/containerd/config.toml
   sed -i -e "s#k8s.gcr.io#registry.cn-hangzhou.aliyuncs.com/kainstall#g" \
-         -e "/containerd.runtimes.runc.options/a\ \ \ \ \ \ \ \ \ \ \ \ SystemdCgroup = true" \
-         -e "s#https://registry-1.docker.io#https://yssx4sxy.mirror.aliyuncs.com#g" \
+         -e "/registry.mirrors]/a\ \ \ \ \ \ \ \ [plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"docker.io\"]\n           endpoint = [\"https://yssx4sxy.mirror.aliyuncs.com\"]" \
+         -e "s#SystemdCgroup = false#SystemdCgroup = true#g" \
          -e "s#oom_score = 0#oom_score = -999#" \
          -e "s#max_concurrent_downloads = 3#max_concurrent_downloads = 10#g" /etc/containerd/config.toml
 
@@ -1061,6 +1061,11 @@ function script::install_cri-o() {
   crio config --default > /etc/crio/crio.conf
   sed -i -e "s#k8s.gcr.io#registry.cn-hangzhou.aliyuncs.com/kainstall#g" \
          -e 's|#registries = \[|registries = ["docker.io", "quay.io"]|g' /etc/crio/crio.conf
+
+  cat << EOF >> /etc/crio/crio.conf
+[crio.image]
+pause_image = "registry.cn-hangzhou.aliyuncs.com/kainstall/pause:3.6"
+EOF
 
   [ -d /etc/containers/registries.conf.d ] && cat << EOF > /etc/containers/registries.conf.d/000-dockerio.conf
 [[registry]]
@@ -1571,7 +1576,7 @@ function init::node_config() {
       $(declare -f script::init_node)
       script::init_node
    "
-    check::exit_code "$?" "init" "init master $host"
+    check::exit_code "$?" "init" "init master $host" "exit"
 
     # 设置主机名和解析
     command::exec "${host}" "
@@ -1605,7 +1610,7 @@ EOF
       $(declare -f script::init_node)
       script::init_node
     "
-    check::exit_code "$?" "init" "init worker $host"
+    check::exit_code "$?" "init" "init worker $host" "exit"
 
     # 设置主机名和解析
     command::exec "${host}" "
@@ -2009,7 +2014,7 @@ EOF
     fi
   "
   local status="$?"
-  check::exit_code "$status" "apply" "add $file"
+  check::exit_code "$status" "apply" "add $file" "exit"
   return "$status"
 }
 
