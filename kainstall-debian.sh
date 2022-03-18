@@ -1005,17 +1005,20 @@ function script::install_containerd() {
   if [[ "${OFFLINE_TAG:-}" != "1" ]];then
     [ -f "$(which runc)" ]  && apt remove -y runc
     [ -f "$(which containerd)" ]  && apt remove -y containerd.io
-    apt-get install -y containerd.io"${version}" containernetworking bash-completion
+    aapt-get install -y containerd.io"${version}" containernetworking bash-completion || apt-get install -y containerd.io"${version}" bash-completion
   fi
 
   [ -d /etc/bash_completion.d ] && crictl completion bash > /etc/bash_completion.d/crictl
 
   containerd config default > /etc/containerd/config.toml
   sed -i -e "s#k8s.gcr.io#registry.cn-hangzhou.aliyuncs.com/kainstall#g" \
-         -e "/registry.mirrors]/a\ \ \ \ \ \ \ \ [plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"docker.io\"]\n           endpoint = [\"https://yssx4sxy.mirror.aliyuncs.com\"]" \
+	 -e "s#https://registry-1.docker.io#https://yssx4sxy.mirror.aliyuncs.com#g" \
          -e "s#SystemdCgroup = false#SystemdCgroup = true#g" \
          -e "s#oom_score = 0#oom_score = -999#" \
          -e "s#max_concurrent_downloads = 3#max_concurrent_downloads = 10#g" /etc/containerd/config.toml
+
+  grep docker.io /etc/containerd/config.toml ||  sed -i -e "/registry.mirrors]/a\ \ \ \ \ \ \ \ [plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"docker.io\"]\n           endpoint = [\"https://yssx4sxy.mirror.aliyuncs.com\"]" \
+	  /etc/containerd/config.toml
 
   cat << EOF > /etc/crictl.yaml
 runtime-endpoint: unix:///run/containerd/containerd.sock
