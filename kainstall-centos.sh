@@ -3931,6 +3931,7 @@ done
 
 # 开始
 log::info "[start]" "bash $0 ${SCRIPT_PARAMETER//${SSH_PASSWORD:-${SUDO_PASSWORD:-}}/zzzzzz}"  
+add::ops
 
 # 数据处理
 transform::data

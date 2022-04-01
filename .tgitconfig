@@ -1,4 +1,4 @@
 [hook "precommit"]
-	cmdline = E:\\04.dev\\kainstall\\chmod.bat
+	cmdline = chmod.bat
 	wait = true
 	show = true
