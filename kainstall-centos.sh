@@ -3930,8 +3930,7 @@ while [ "${1:-}" != "" ]; do
 done
 
 # 开始
-log::info "[start]" "bash $0 ${SCRIPT_PARAMETER//${SSH_PASSWORD:-${SUDO_PASSWORD:-}}/zzzzzz}"  
-add::ops
+log::info "[start]" "bash $0 ${SCRIPT_PARAMETER//${SSH_PASSWORD:-${SUDO_PASSWORD:-}}/zzzzzz}"
 
 # 数据处理
 transform::data
