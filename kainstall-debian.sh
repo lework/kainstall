@@ -3278,9 +3278,9 @@ spec:
             - etcdctl --endpoints=https://127.0.0.1:2379 --cacert=/etc/kubernetes/pki/etcd/ca.crt
               --cert=/etc/kubernetes/pki/etcd/healthcheck-client.crt --key=/etc/kubernetes/pki/etcd/healthcheck-client.key
               snapshot save /backup/etcd-snapshot-\\\\\\\$(date +%Y-%m-%d_%H:%M:%S_%Z).db
-              && echo 'delete old backups' && find /backup -type f -mtime +30 -exec rm -fv {} \\; || echo error
+              && echo 'delete old backups' && { find /backup -type f -mtime +30 -exec rm -fv {} \\; || echo error; }
             command:
-            - /bin/sh
+            - /usr/bin/bash
             env:
             - name: ETCDCTL_API
               value: '3'
