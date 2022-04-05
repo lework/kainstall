@@ -1010,13 +1010,13 @@ EOF
 
   containerd config default > /etc/containerd/config.toml
   sed -i -e "s#k8s.gcr.io#registry.cn-hangzhou.aliyuncs.com/kainstall#g" \
-	 -e "s#https://registry-1.docker.io#https://yssx4sxy.mirror.aliyuncs.com#g" \
+         -e "s#https://registry-1.docker.io#https://yssx4sxy.mirror.aliyuncs.com#g" \
          -e "s#SystemdCgroup = false#SystemdCgroup = true#g" \
          -e "s#oom_score = 0#oom_score = -999#" \
          -e "s#max_concurrent_downloads = 3#max_concurrent_downloads = 10#g" /etc/containerd/config.toml
 
   grep docker.io /etc/containerd/config.toml ||  sed -i -e "/registry.mirrors]/a\ \ \ \ \ \ \ \ [plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"docker.io\"]\n           endpoint = [\"https://yssx4sxy.mirror.aliyuncs.com\"]" \
-	  /etc/containerd/config.toml
+       /etc/containerd/config.toml
 
   cat << EOF > /etc/crictl.yaml
 runtime-endpoint: unix:///run/containerd/containerd.sock
@@ -3039,9 +3039,19 @@ function add::storage() {
     log::info "[storage]" "add rook"
     utils::download_file "${GITHUB_PROXY}https://github.com/rook/rook/archive/v${ROOK_VERSION}.zip" "${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}.zip" "unzip"
 
-    kube::apply "${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/common.yaml"
-    kube::apply "${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/operator.yaml"
-    kube::apply "${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/cluster/examples/kubernetes/ceph/cluster.yaml"
+    command::exec "${MGMT_NODE}" "
+      cd '${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/deploy/examples' \
+      && sed -i -e 's/# ROOK_CSI_\\(.*\\)_IMAGE/ROOK_CSI_\\1_IMAGE/g' \
+                -e 's#\\k8s\\.gcr\\.io/sig-storage#${KUBE_IMAGE_REPO}#g' \
+                -e 's#\\quay\\.io/cephcsi#${KUBE_IMAGE_REPO}#g' operator.yaml \
+      && sed -i 's#quay.io/ceph#${KUBE_IMAGE_REPO}#g' cluster.yaml
+    " 
+    check::exit_code "$?" "storage" "image using proxy"
+
+    kube::apply "${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/deploy/examples/crds.yaml"
+    kube::apply "${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/deploy/examples/common.yaml"
+    kube::apply "${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/deploy/examples/operator.yaml"
+    kube::apply "${OFFLINE_DIR}/manifests/rook-${ROOK_VERSION}/deploy/examples/cluster.yaml"
 
   elif [[ "$KUBE_STORAGE" == "longhorn" ]]; then
     log::info "[storage]" "add longhorn"
@@ -3201,10 +3211,12 @@ fi
     kube::wait "ks-installer" "kubesphere-system" "pods" "app=ks-install"
     command::exec "${MGMT_NODE}" "
       $(declare -f utils::retry) 
-      utils::retry 10 kubectl -n kubesphere-system get pods redis-ha-server-0
-      kubectl -n kubesphere-system get sts redis-ha-server -o yaml | sed 's#node-role.kubernetes.io/master#node-role.kubernetes.io/worker#g' | kubectl replace --force -f -
-      utils::retry 10 kubectl -n kubesphere-system get pods openldap-0
-      kubectl -n kubesphere-system get sts openldap -o yaml | sed 's#node-role.kubernetes.io/master#node-role.kubernetes.io/worker#g' | kubectl replace --force -f -
+      utils::retry 10 kubectl -n kubesphere-system get pods redis-ha-server-0 \
+        && { kubectl -n kubesphere-system get sts redis-ha-server -o yaml | sed 's#node-role.kubernetes.io/master#node-role.kubernetes.io/worker#g' | kubectl replace --force -f -; } \
+        && echo not replace redis-ha-server
+      utils::retry 10 kubectl -n kubesphere-system get pods openldap-0 \
+        && { kubectl -n kubesphere-system get sts openldap -o yaml | sed 's#node-role.kubernetes.io/master#node-role.kubernetes.io/worker#g' | kubectl replace --force -f -; } \
+        && echo not replace openldap
     "
     check::exit_code "$?" "ui" "set statefulset to worker node"
 
@@ -3930,7 +3942,7 @@ while [ "${1:-}" != "" ]; do
 done
 
 # 开始
-log::info "[start]" "bash $0 ${SCRIPT_PARAMETER//${SSH_PASSWORD:-${SUDO_PASSWORD:-}}/zzzzzz}"  
+log::info "[start]" "bash $0 ${SCRIPT_PARAMETER//${SSH_PASSWORD:-${SUDO_PASSWORD:-}}/zzzzzz}"
 
 # 数据处理
 transform::data
