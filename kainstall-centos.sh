@@ -1692,7 +1692,7 @@ function init::add_node() {
   
   if [[ "$MASTER_NODES" != "" ]]; then
     command::exec "${MGMT_NODE}" "
-      kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$'
+      kubectl get node --selector='node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' |grep -Eo 'node[0-9]*'|grep -Eo '[0-9]*'|awk -F ' ' 'BEGIN {max = 0} {if (\$0+0 > max+0) max=\$0} END {print max}'
     "
     get::command_output "master_index" "$?" "exit"
     master_index=$(( master_index + 1 ))
@@ -1706,7 +1706,7 @@ function init::add_node() {
 
   if [[ "$WORKER_NODES" != "" ]]; then
     command::exec "${MGMT_NODE}" "
-      kubectl get node --selector='!node-role.kubernetes.io/master' -o jsonpath='{\$.items[*].metadata.name}' | grep -Eo '[0-9]+\$' || echo 0
+      kubectl get node --selector='node-role.kubernetes.io/worker' -o jsonpath='{\$.items[*].metadata.name}'| grep -Eo 'node[0-9]*'|grep -Eo '[0-9]*'|awk 'BEGIN {max = 0} {if (\$0+0 > max+0) max=\$0} END {print max}' || echo 0
     "
     get::command_output "worker_index" "$?" "exit"
     worker_index=$(( worker_index + 1 ))
