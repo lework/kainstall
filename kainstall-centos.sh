@@ -2474,8 +2474,8 @@ function add::network() {
 
   elif [[ "$KUBE_NETWORK" == "calico" ]]; then
     log::info "[network]" "add calico"
-    utils::download_file "https://docs.projectcalico.org/v${CALICO_VERSION%.*}/manifests/calico.yaml" "${OFFLINE_DIR}/manifests/calico.yaml"
-    utils::download_file "https://docs.projectcalico.org/v${CALICO_VERSION%.*}/manifests/calicoctl.yaml" "${OFFLINE_DIR}/manifests/calicoctl.yaml"
+    utils::download_file "https://projectcalico.docs.tigera.io/archive/v${CALICO_VERSION%.*}/manifests/calico.yaml" "${OFFLINE_DIR}/manifests/calico.yaml"
+    utils::download_file "https://projectcalico.docs.tigera.io/archive/v${CALICO_VERSION%.*}/manifests/calicoctl.yaml" "${OFFLINE_DIR}/manifests/calicoctl.yaml"
     
     command::exec "${MGMT_NODE}" "
       sed -i \"s#:v.*#:v${CALICO_VERSION}#g\" \"${OFFLINE_DIR}/manifests/calico.yaml\"
@@ -2562,7 +2562,7 @@ function add::addon() {
   if [[ "$KUBE_ADDON" == "metrics-server" ]]; then
     log::info "[addon]" "download metrics-server manifests"
     local metrics_server_file="${OFFLINE_DIR}/manifests/metrics-server.yml"
-    utils::download_file "${GITHUB_PROXY}/https://github.com/kubernetes-sigs/metrics-server/releases/download/v${METRICS_SERVER_VERSION}/components.yaml" "${metrics_server_file}"
+    utils::download_file "${GITHUB_PROXY}https://github.com/kubernetes-sigs/metrics-server/releases/download/v${METRICS_SERVER_VERSION}/components.yaml" "${metrics_server_file}"
   
     command::exec "${MGMT_NODE}" "
       sed -i -e 's#k8s.gcr.io/metrics-server#$KUBE_IMAGE_REPO#g' \
