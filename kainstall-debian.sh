@@ -733,7 +733,7 @@ MEM_INFO="\$(cat /proc/meminfo | awk '/MemTotal:/{total=\$2/1024/1024;next} /Mem
 
 # network
 # extranet_ip=" and \$(curl -s ip.cip.cc)"
-IP_INFO="\$(ip a | grep glo | awk '{print \$2}' | head -1 | cut -f1 -d/)\${extranet_ip:-}"
+IP_INFO="\$(ip a|grep -E '^[0-9]+: em*|^[0-9]+: eno*|^[0-9]+: enp*|^[0-9]+: ens*|^[0-9]+: eth*|^[0-9]+: wlp*' -A2|grep inet|awk -F ' ' '{print $2}'|cut -f1 -d/|xargs echo)"
 
 # Container info
 CONTAINER_INFO="\$(sudo /usr/bin/crictl ps -a -o yaml 2> /dev/null | awk '/^  state: /{gsub("CONTAINER_", "", \$NF) ++S[\$NF]}END{for(m in S) printf "%s%s:%s ",substr(m,1,1),tolower(substr(m,2)),S[m]}')Images:\$(sudo /usr/bin/crictl images -q 2> /dev/null | wc -l)"
