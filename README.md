@@ -92,13 +92,13 @@ MEM: `4G`
 
 ```bash
 # centos
-wget https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall-centos.sh
+wget https://ghproxy.com/https://raw.githubusercontent.com/lework/kainstall/master/kainstall-centos.sh
 
 # debian
-wget https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall-debian.sh
+wget https://ghproxy.com/https://raw.githubusercontent.com/lework/kainstall/master/kainstall-debian.sh
 
 # ubuntu
-wget https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall-ubuntu.sh
+wget https://ghproxy.com/https://raw.githubusercontent.com/lework/kainstall/master/kainstall-ubuntu.sh
 ```
 
 ### 帮助信息
@@ -214,7 +214,7 @@ bash kainstall-centos.sh init
 还可以使用一键安装方式, 连下载都省略了。
 
 ```bash
-bash -c "$(curl -sSL https://cdn.jsdelivr.net/gh/lework/kainstall@master/kainstall-centos.sh)"  \
+bash -c "$(curl -sSL https://ghproxy.com/https://raw.githubusercontent.com/lework/kainstall/master/kainstall-centos.sh)"  \
   - init \
   --master 192.168.77.130,192.168.77.131,192.168.77.132 \
   --worker 192.168.77.133,192.168.77.134 \
