@@ -432,6 +432,10 @@ fs.file-max = 2097152
 fs.nr_open = 2097152
 fs.suid_dumpable = 0
 
+# 同时可以拥有的的异步IO请求数目
+fs.aio-max-nr = 10000000
+fs.aio-nr = 75552
+
 # 文件监控
 fs.inotify.max_user_instances=8192
 fs.inotify.max_user_watches=524288
