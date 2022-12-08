@@ -1017,6 +1017,7 @@ function script::install_containerd() {
 
   containerd config default > /etc/containerd/config.toml
   sed -i -e "s#k8s.gcr.io#registry.cn-hangzhou.aliyuncs.com/kainstall#g" \
+         -e "s#registry.k8s.io#registry.cn-hangzhou.aliyuncs.com/kainstall#g" \
          -e "s#https://registry-1.docker.io#https://yssx4sxy.mirror.aliyuncs.com#g" \
          -e "s#SystemdCgroup = false#SystemdCgroup = true#g" \
          -e "s#oom_score = 0#oom_score = -999#" \
@@ -1833,7 +1834,7 @@ controllerManager:
     node-monitor-grace-period: '20s'
     pod-eviction-timeout: '2m'
     terminated-pod-gc-threshold: '30'
-    experimental-cluster-signing-duration: 87600h
+    cluster-signing-duration: 87600h
     feature-gates: RotateKubeletServerCertificate=true
   extraVolumes:
   - hostPath: /usr/share/zoneinfo/Asia/Shanghai
@@ -1874,7 +1875,7 @@ EOF
   check::exit_code "$?" "kubeadm init" "${MGMT_NODE}: set kube config" "exit"
   if [[ "$(echo "$MASTER_NODES" | wc -w)" == "1" ]]; then
     log::info "[kubeadm init]" "${MGMT_NODE}: delete master taint"
-    command::exec "$MASTER_NODES" "kubectl taint nodes --all node-role.kubernetes.io/master- node-role.kubernetes.io/control-plane- | echo"
+    command::exec "${MGMT_NODE}" "kubectl taint nodes --all node-role.kubernetes.io/master- || kubectl taint nodes --all node-role.kubernetes.io/control-plane-"
     check::exit_code "$?" "kubeadm init" "${MGMT_NODE}: delete master taint"
   fi
 
