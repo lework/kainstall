@@ -3268,7 +3268,7 @@ function add::ops() {
   [[ "${master_num:-0}" == "0" ]] && master_num=1
   kube::apply "etcd-snapshot" """
 ---
-apiVersion: batch/v1beta1
+apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: etcd-snapshot
@@ -3667,7 +3667,7 @@ function upgrade::cluster() {
   do
     log::info "[upgrade]" "node: $host"
     local local_version=""
-    command::exec "${host}" "kubectl version --client --short | awk '{print \$3}'"
+    command::exec "${host}" "kubectl version --client --output=yaml | awk '/gitVersion:/ {print \$2}'"
     get::command_output "local_version" "$?" && local_version="${local_version#v}"
 
     if [[ "${KUBE_VERSION}" != "latest" ]]; then
