@@ -84,6 +84,9 @@ GCR_PROXY="${GCR_PROXY:-k8sgcr.lework.workers.dev}"
 SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
 SKIP_SET_OS_REPO=${SKIP_SET_OS_REPO:-false}
 
+# I decided the version based on this link(https://github.com/kubernetes/kops/issues/15204), because I couldn't find which version started to change
+FLANNEL_NAMESPACE_CHANGED_VERSION="${FLANNEL_NAMESPACE_CHANGED_VERSION:-1.25.7}"
+
 trap trap::info 1 2 3 15 EXIT
 
 ######################################################################################################
@@ -2441,6 +2444,12 @@ spec:
   fi
 }
 
+#compare version numbers
+function is::larger_version_than() {
+  local version1=$1;
+  local version2=$2;  
+  return $(echo "$version1" "$version2" | awk '{if ($1 >= $2) print 1; else print 0}')
+}
 
 function add::network() {
   # 添加network组件
@@ -2461,7 +2470,12 @@ function add::network() {
     "
     check::exit_code "$?" "flannel" "change flannel pod subnet"
     kube::apply "${flannel_file}"
-    kube::wait "flannel" "kube-system" "pods" "app=flannel"
+    is::larger_version_than $KUBE_VERSION $FLANNEL_NAMESPACE_CHANGED_VERSION
+    if [ $? -eq 1 ];then
+      kube::wait "flannel" "kube-flannel" "pods" "app=flannel"
+    else
+      kube::wait "flannel" "kube-system" "pods" "app=flannel"
+    fi 
 
   elif [[ "$KUBE_NETWORK" == "calico" ]]; then
     log::info "[network]" "add calico"
