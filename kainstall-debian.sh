@@ -2448,7 +2448,7 @@ spec:
 function is::larger_version_than() {
   local version1=$1;
   local version2=$2;  
-  return $(echo "$version1" "$version2" | awk '{if ($1 >= $2) print 1; else print 0}')
+  return "$(echo "$version1" "$version2" | awk '{if ($1 >= $2) print 1; else print 0}')"
 }
 
 function add::network() {
@@ -2470,7 +2470,7 @@ function add::network() {
     "
     check::exit_code "$?" "flannel" "change flannel pod subnet"
     kube::apply "${flannel_file}"
-    is::larger_version_than $KUBE_VERSION $FLANNEL_NAMESPACE_CHANGED_VERSION
+    is::larger_version_than "${KUBE_VERSION}" "${FLANNEL_NAMESPACE_CHANGED_VERSION}"
     if [ $? -eq 1 ];then
       kube::wait "flannel" "kube-flannel" "pods" "app=flannel"
     else
