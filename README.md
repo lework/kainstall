@@ -136,7 +136,7 @@ Flag:
   -M,--monitor         cluster monitor, choose: [prometheus]
   -l,--log             cluster log, choose: [elasticsearch]
   -s,--storage         cluster storage, choose: [rook,longhorn]
-     --cri             cri runtime, choose: [docker,containerd,cri-o], default: docker
+     --cri             cri runtime, choose: [docker,containerd,cri-o], default: containerd
      --cri-version     cri version, default: latest
      --cri-endpoint    cri endpoint, default: /var/run/dockershim.sock
   -U,--upgrade-kernel  upgrade kernel
