@@ -877,9 +877,7 @@ function script::upgrade_kernel() {
       -i /etc/yum.repos.d/elrepo.repo
   
   if ! command -v perl; then yum install -y perl;fi
-  [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y --disablerepo="*" --enablerepo=elrepo-kernel perl kernel-ml{,-devel}
-
-  [[ "$?" -ne 0 ]] && exit 1
+  [[ "${OFFLINE_TAG:-}" != "1" ]] && if ! yum install -y --disablerepo="*" --enablerepo=elrepo-kernel kernel-ml{,-devel}; then exit 1;fi
   
   grub2-set-default 0 && grub2-mkconfig -o /etc/grub2.cfg
   grubby --default-kernel
@@ -1073,8 +1071,7 @@ EOF
     [ -f "$(which crio)" ]  && yum remove -y cri-o
     [ -f "$(which docker)" ]  && yum remove -y docker-ce docker-ce-cli containerd.io
 
-    yum install -y runc cri-o bash-completion --disablerepo=docker-ce-stable || yum install -y runc cri-o bash-completion
-    [ "$?" -ne 0 ] && exit 1
+    yum install -y runc cri-o bash-completion --disablerepo=docker-ce-stable || if ! yum install -y runc cri-o bash-completion; then exit 1;fi
   fi
 
   [ -d /etc/bash_completion.d ] && \
@@ -2535,14 +2532,14 @@ function add::network() {
   elif [[ "$KUBE_NETWORK" == "cilium" ]]; then 
     log::info "[network]" "add cilium"
 
-    CILIUM_CLI_VERSION=$(curl -s ${GITHUB_PROXY}https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+    CILIUM_CLI_VERSION=$(curl -s "${GITHUB_PROXY}https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt")
     CLI_ARCH=amd64
     if [ "$(uname -m)" = "aarch64" ]; then CLI_ARCH=arm64; fi
     utils::download_file "${GITHUB_PROXY}https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz"  "${OFFLINE_DIR}/cilium-linux-${CLI_ARCH}.tar.gz"
     tar xzvfC "${OFFLINE_DIR}/cilium-linux-${CLI_ARCH}.tar.gz" /usr/local/bin
     [ -d /etc/bash_completion.d ] && cilium completion bash > /etc/bash_completion.d/cilium
 
-    cilium install --version ${CILIUM_VERSION} \
+    cilium install --version "${CILIUM_VERSION}" \
                    --set ipam.mode=cluster-pool \
                    --set ipam.Operator.clusterPoolIPv4PodCIDRList=["{KUBE_POD_SUBNET}"] \
                    --set ipam.Operator.clusterPoolIPv4MaskSize=24 \
