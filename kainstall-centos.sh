@@ -20,18 +20,18 @@ set -o pipefail         # Use last non-zero exit code in a pipeline
 
 # 版本
 KUBE_VERSION="${KUBE_VERSION:-latest}"
-FLANNEL_VERSION="${FLANNEL_VERSION:-0.19.0}"
-METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.6.1}"
-INGRESS_NGINX="${INGRESS_NGINX:-1.3.0}"
-TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.6.1}"
-CALICO_VERSION="${CALICO_VERSION:-3.22.4}"
-CILIUM_VERSION="${CILIUM_VERSION:-1.9.17}"
-KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.11.0}"
-ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-8.3.2}"
-ROOK_VERSION="${ROOK_VERSION:-1.9.7}"
-LONGHORN_VERSION="${LONGHORN_VERSION:-1.3.0}"
-KUBERNETES_DASHBOARD_VERSION="${KUBERNETES_DASHBOARD_VERSION:-2.6.0}"
-KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.3.0}"
+FLANNEL_VERSION="${FLANNEL_VERSION:-0.24.0}"
+METRICS_SERVER_VERSION="${METRICS_SERVER_VERSION:-0.6.4}"
+INGRESS_NGINX="${INGRESS_NGINX:-1.9.5}"
+TRAEFIK_VERSION="${TRAEFIK_VERSION:-2.10.7}"
+CALICO_VERSION="${CALICO_VERSION:-3.27.0}"
+CILIUM_VERSION="${CILIUM_VERSION:-1.14.5}"
+KUBE_PROMETHEUS_VERSION="${KUBE_PROMETHEUS_VERSION:-0.13.0}"
+ELASTICSEARCH_VERSION="${ELASTICSEARCH_VERSION:-8.11.3}"
+ROOK_VERSION="${ROOK_VERSION:-1.9.13}"
+LONGHORN_VERSION="${LONGHORN_VERSION:-1.5.3}"
+KUBERNETES_DASHBOARD_VERSION="${KUBERNETES_DASHBOARD_VERSION:-2.7.0}"
+KUBESPHERE_VERSION="${KUBESPHERE_VERSION:-3.3.2}"
 
 # 集群配置
 KUBE_DNSDOMAIN="${KUBE_DNSDOMAIN:-cluster.local}"
@@ -79,7 +79,7 @@ SCRIPT_PARAMETER="$*"
 OFFLINE_DIR="/tmp/kainstall-offline-file/"
 OFFLINE_FILE=""
 OS_SUPPORT="centos7 centos8"
-GITHUB_PROXY="${GITHUB_PROXY:-https://ghproxy.com/}"
+GITHUB_PROXY="${GITHUB_PROXY:-https://mirror.ghproxy.com/}"
 GCR_PROXY="${GCR_PROXY:-k8sgcr.lework.workers.dev}"
 SKIP_UPGRADE_PLAN=${SKIP_UPGRADE_PLAN:-false}
 SKIP_SET_OS_REPO=${SKIP_SET_OS_REPO:-false}
@@ -340,6 +340,8 @@ function script::init_node() {
     -e 's!//download.*/pub!//mirrors.aliyun.com!g' \
     -e 's!http://mirrors\.aliyun!https://mirrors.aliyun!g' \
     -i /etc/yum.repos.d/epel.repo
+
+  yum clean all
 
   # Change limits
   [ ! -f /etc/security/limits.conf_bak ] && cp /etc/security/limits.conf{,_bak}
@@ -873,8 +875,12 @@ function script::upgrade_kernel() {
   sed -e "s/^mirrorlist=/#mirrorlist=/g" \
       -e "s/elrepo.org\/linux/mirrors.tuna.tsinghua.edu.cn\/elrepo/g" \
       -i /etc/yum.repos.d/elrepo.repo
-  [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y --disablerepo="*" --enablerepo=elrepo-kernel kernel-ml{,-devel}
+  
+  if ! command -v perl; then yum install -y perl;fi
+  [[ "${OFFLINE_TAG:-}" != "1" ]] && yum install -y --disablerepo="*" --enablerepo=elrepo-kernel perl kernel-ml{,-devel}
 
+  [[ "$?" -ne 0 ]] && exit 1
+  
   grub2-set-default 0 && grub2-mkconfig -o /etc/grub2.cfg
   grubby --default-kernel
   grubby --args="cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory user_namespace.enable=1" --update-kernel="$(grubby --default-kernel)"
@@ -966,9 +972,6 @@ EOF
   "oom-score-adjust": -1000,
   "max-concurrent-downloads": 10,
   "max-concurrent-uploads": 10,
-  "storage-driver": "overlay2",
-  "storage-opts": ["overlay2.override_kernel_check=true"],
-  "exec-opts": ["native.cgroupdriver=systemd"],
   "registry-mirrors": [
     "https://yssx4sxy.mirror.aliyuncs.com/"
   ]
@@ -1021,6 +1024,7 @@ EOF
          -e "s#https://registry-1.docker.io#https://yssx4sxy.mirror.aliyuncs.com#g" \
          -e "s#SystemdCgroup = false#SystemdCgroup = true#g" \
          -e "s#oom_score = 0#oom_score = -999#" \
+         -e "s#max_container_log_line_size = 16384#max_container_log_line_size = 65535#" \
          -e "s#max_concurrent_downloads = 3#max_concurrent_downloads = 10#g" /etc/containerd/config.toml
 
   grep docker.io /etc/containerd/config.toml ||  sed -i -e "/registry.mirrors]/a\ \ \ \ \ \ \ \ [plugins.\"io.containerd.grpc.v1.cri\".registry.mirrors.\"docker.io\"]\n           endpoint = [\"https://yssx4sxy.mirror.aliyuncs.com\"]" \
@@ -1070,6 +1074,7 @@ EOF
     [ -f "$(which docker)" ]  && yum remove -y docker-ce docker-ce-cli containerd.io
 
     yum install -y runc cri-o bash-completion --disablerepo=docker-ce-stable || yum install -y runc cri-o bash-completion
+    [ "$?" -ne 0 ] && exit 1
   fi
 
   [ -d /etc/bash_completion.d ] && \
@@ -1122,15 +1127,19 @@ function script::install_kube() {
   
   local version="-${1:-latest}"
   version="${version#-latest}"
+
+  repo="${version%.*}"
+  repo="${repo//-}"
+  [ "${repo}" == "" ] && repo="1.29"
   
   cat <<EOF > /etc/yum.repos.d/kubernetes.repo
 [kubernetes]
 name=Kubernetes
-baseurl=https://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-x86_64/
+baseurl=https://pkgs.k8s.io/core:/stable:/v${repo}/rpm/
 enabled=1
-gpgcheck=0
-repo_gpgcheck=0
-gpgkey=https://mirrors.aliyun.com/kubernetes/yum/doc/yum-key.gpg https://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg
+gpgcheck=1
+gpgkey=https://pkgs.k8s.io/core:/stable:/v${repo}/rpm/repodata/repomd.xml.key
+exclude=kubelet kubeadm kubectl cri-tools kubernetes-cni
 EOF
 
   if [[ "${OFFLINE_TAG:-}" != "1" ]];then
@@ -1168,7 +1177,7 @@ function script::install_haproxy() {
    
   if [[ "${OFFLINE_TAG:-}" != "1" ]];then
     [ -f /usr/bin/haproxy ] && yum remove -y haproxy
-    yum install -y haproxy
+    yum install -y haproxy rsyslog
   fi
 
   [ ! -f /etc/haproxy/haproxy.cfg_bak ] && cp /etc/haproxy/haproxy.cfg{,_bak}
@@ -1208,8 +1217,15 @@ backend kube-apiserver-backend
 $(index=1;for h in $api_servers;do echo "    server apiserver${index} $h:6443 check";index=$((index+1));done)
 EOF
 
+cat <<EOF > /etc/rsyslog.d/haproxy.conf
+local0.* /var/log/haproxy.log
+local1.* /var/log/haproxy.log
+EOF
+
   systemctl enable haproxy
   systemctl restart haproxy
+  systemctl enable rsyslog
+  systemctl restart rsyslog
 }
 
 
@@ -1487,15 +1503,15 @@ function cert::renew_node() {
   do
     log::info "[cert]" "drain $host"
     command::exec "${MGMT_NODE}" "kubectl drain $host --force --ignore-daemonsets --delete-local-data"
-    check::exit_code "$?" "cert" "$host: drain"
+    check::exit_code "$?" "cert" "$host: drain" "exit"
     sleep 5
     
     if [[ "${role}" == "master" || "${role}" == "control-plane" ]]; then
       command::exec "${host}" "cp -rf /etc/kubernetes /etc/kubernetes_\$(date +%Y-%m-%d)"
-      check::exit_code "$?" "cert" "$host: backup kubernetes config"
+      check::exit_code "$?" "cert" "$host: backup kubernetes config" "exit"
       
       command::exec "${host}" "kubeadm certs renew all 2>/dev/null|| kubeadm alpha certs renew all"
-      check::exit_code "$?" "cert" "$host: renew certs"
+      check::exit_code "$?" "cert" "$host: renew certs" "exit"
       
       command::exec "${host}" "
         $(declare -f utils::retry)
@@ -1538,10 +1554,10 @@ function cert::renew_node() {
         cp /etc/kubernetes/kubelet.conf /etc/kubernetes/kubelet.conf_bak
         echo '$(printf "%s" "${kubelet_config}" | sed 's#https://.*:#https://127.0.0.1:#g')' > /etc/kubernetes/kubelet.conf
       "
-      check::exit_code "$?" "cert" "$host: copy kubelet config"
+      check::exit_code "$?" "cert" "$host: copy kubelet config" "exit"
 
       command::exec "${host}" "rm -rfv /var/lib/kubelet/pki/*"
-      check::exit_code "$?" "cert" "$host: delete kubelet pki files"
+      check::exit_code "$?" "cert" "$host: delete kubelet pki files" "exit"
 
       command::exec "${host}" "
         $(declare -f utils::retry)
@@ -1847,7 +1863,6 @@ controllerManager:
     bind-address: 0.0.0.0
     node-cidr-mask-size: '24'
     node-monitor-grace-period: '20s'
-    pod-eviction-timeout: '2m'
     terminated-pod-gc-threshold: '30'
     cluster-signing-duration: 87600h
     feature-gates: RotateKubeletServerCertificate=true
@@ -2177,6 +2192,17 @@ function add::ingress() {
     command::exec "${MGMT_NODE}" "kubectl delete -A ValidatingWebhookConfiguration ingress-nginx-admission"
     check::exit_code "$?" "ingress" "delete ingress-ngin ValidatingWebhookConfiguration"
 
+
+    log::info "[ingress]"  "set nginx is default ingress class"
+    command::exec "${MGMT_NODE}" "
+      default_class=\"\$(kubectl get ingressclass -A -o jsonpath='{.items[?(@.metadata.annotations.ingressclass\\.kubernetes\\.io/is-default-class==\\\"true\\\")].metadata.name}')\"
+      if [ \"\${default_class:-}\" != \"\" ]; then
+         kubectl patch ingressclass \${default_class} -p '{\"metadata\": {\"annotations\":{\"ingressclass.kubernetes.io/is-default-class\":\"false\"}}}'
+      fi
+      kubectl patch ingressclass nginx -p '{\"metadata\": {\"annotations\":{\"ingressclass.kubernetes.io/is-default-class\":\"true\"}}}'
+    "
+    check::exit_code "$?" "ingress" "set nginx is default ingress class"
+
   elif [[ "$KUBE_INGRESS" == "traefik" ]]; then
     log::info "[ingress]" "add ingress-traefik"
     kube::apply "traefik" """
@@ -2413,7 +2439,7 @@ spec:
     spec:
       containers:
       - name: whoami
-        image: traefik/whoami:v1.7.1
+        image: traefik/whoami:v1.10.1
         ports:
         - containerPort: 80
 ---
@@ -2476,6 +2502,7 @@ function add::network() {
     command::exec "${MGMT_NODE}" "
       sed -i -e 's#10.244.0.0/16#${KUBE_POD_SUBNET}#g' \
              -e 's#quay.io/coreos#${KUBE_IMAGE_REPO}#g' \
+             -e 's#docker.io/flannel#${KUBE_IMAGE_REPO}#g' \
              -e 's#\"Type\": \"vxlan\"#\"Type\": \"${KUBE_FLANNEL_TYPE}\"#g' \"${flannel_file}\"
       if [[ \"${KUBE_FLANNEL_TYPE}\" == \"vxlan\" ]]; then
         sed -i 's#\"Type\": \"vxlan\"#\"Type\": \"vxlan\", \"DirectRouting\": true#g' \"${flannel_file}\"
@@ -2492,13 +2519,11 @@ function add::network() {
 
   elif [[ "$KUBE_NETWORK" == "calico" ]]; then
     log::info "[network]" "add calico"
-    utils::download_file "https://projectcalico.docs.tigera.io/archive/v${CALICO_VERSION%.*}/manifests/calico.yaml" "${OFFLINE_DIR}/manifests/calico.yaml"
-    utils::download_file "https://projectcalico.docs.tigera.io/archive/v${CALICO_VERSION%.*}/manifests/calicoctl.yaml" "${OFFLINE_DIR}/manifests/calicoctl.yaml"
+    utils::download_file "https://raw.githubusercontent.com/projectcalico/calico/v${CALICO_VERSION}/manifests/calico.yaml" "${OFFLINE_DIR}/manifests/calico.yaml"
+    utils::download_file "https://raw.githubusercontent.com/projectcalico/calico/v${CALICO_VERSION}/manifests/calicoctl.yaml" "${OFFLINE_DIR}/manifests/calicoctl.yaml"
     
     command::exec "${MGMT_NODE}" "
-      sed -i \"s#:v.*#:v${CALICO_VERSION}#g\" \"${OFFLINE_DIR}/manifests/calico.yaml\"
       sed -i 's#value: \"Always\"#value: \"CrossSubnet\"#g' \"${OFFLINE_DIR}/manifests/calico.yaml\"
-      sed -i \"s#:v.*#:v${CALICO_VERSION}#g\" \"${OFFLINE_DIR}/manifests/calicoctl.yaml\"
     "
     check::exit_code "$?" "network" "change calico version to ${CALICO_VERSION}"
     
@@ -2510,36 +2535,22 @@ function add::network() {
   elif [[ "$KUBE_NETWORK" == "cilium" ]]; then 
     log::info "[network]" "add cilium"
 
-    local cilium_file="${OFFLINE_DIR}/manifests/cilium.yml"
-    local cilium_hubble_file="${OFFLINE_DIR}/manifests/cilium_hubble.yml"
-    utils::download_file "${GITHUB_PROXY}https://raw.githubusercontent.com/cilium/cilium/${CILIUM_VERSION}/install/kubernetes/quick-install.yaml" "${cilium_file}"
-    utils::download_file "${GITHUB_PROXY}https://raw.githubusercontent.com/cilium/cilium/${CILIUM_VERSION}/install/kubernetes/quick-hubble-install.yaml" "${cilium_hubble_file}"
+    CILIUM_CLI_VERSION=$(curl -s ${GITHUB_PROXY}https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+    CLI_ARCH=amd64
+    if [ "$(uname -m)" = "aarch64" ]; then CLI_ARCH=arm64; fi
+    utils::download_file "${GITHUB_PROXY}https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz"  "${OFFLINE_DIR}/cilium-linux-${CLI_ARCH}.tar.gz"
+    tar xzvfC "${OFFLINE_DIR}/cilium-linux-${CLI_ARCH}.tar.gz" /usr/local/bin
+    [ -d /etc/bash_completion.d ] && cilium completion bash > /etc/bash_completion.d/cilium
 
-    local all_node=""
-    if [[ "${MASTER_NODES}" == "" && "${WORKER_NODES}" == "" ]]; then 
-      command::exec "${MGMT_NODE}" "
-        kubectl get node -o jsonpath='{range.items[*]}{.status.addresses[?(@.type==\"InternalIP\")].address} {end}'
-      "
-      get::command_output "all_node" "$?"
-    else
-      all_node="${MASTER_NODES} ${WORKER_NODES}"
-    fi
+    cilium install --version ${CILIUM_VERSION} \
+                   --set ipam.mode=cluster-pool \
+                   --set ipam.Operator.clusterPoolIPv4PodCIDRList=["{KUBE_POD_SUBNET}"] \
+                   --set ipam.Operator.clusterPoolIPv4MaskSize=24 \
+                   --set kubeProxyReplacement=false
 
-    for host in $all_node
-    do
-      command::exec "${host}" "mount bpffs -t bpf /sys/fs/bpf"
-      check::exit_code "$?" "network" "${host}: mount bpf filesystem"
-    done
-
-    command::exec "${MGMT_NODE}" "
-      sed -i \"s#10.0.0.0/8#${KUBE_POD_SUBNET}#g\" \"${cilium_file}\"
-    "
-    kube::apply "${cilium_file}"
-    kube::wait "cilium-node" "kube-system" "pods" "k8s-app=cilium"
-    kube::wait "cilium-operator" "kube-system" "pods" "name=cilium-operator"
-    kube::apply "${cilium_hubble_file}"
-    kube::wait "hubble-relay" "kube-system" "pods" "k8s-app=hubble-relay"
-
+    cilium status --wait
+    cilium hubble enable --ui
+   
     log::info "[monitor]" "add hubble-ui ingress"
     kube::apply "hubble-ui ingress" "
 ---
@@ -2584,12 +2595,14 @@ function add::addon() {
   
     command::exec "${MGMT_NODE}" "
       sed -i -e 's#k8s.gcr.io/metrics-server#$KUBE_IMAGE_REPO#g' \
+             -e 's#registry.k8s.io/metrics-server#$KUBE_IMAGE_REPO#g' \
              -e '/--kubelet-preferred-address-types=.*/d' \
              -e 's/\\(.*\\)- --secure-port=\\(.*\\)/\\1- --secure-port=\\2\\n\\1- --kubelet-insecure-tls\\n\\1- --kubelet-preferred-address-types=InternalIP,InternalDNS,ExternalIP,ExternalDNS,Hostname/g' \
              \"${metrics_server_file}\"
     "
     check::exit_code "$?" "addon" "change metrics-server parameter"
     kube::apply "${metrics_server_file}"
+    kube::wait "metrics-server" "kube-system" "pod" "k8s-app=metrics-server"
   elif [[ "$KUBE_ADDON" == "nodelocaldns" ]]; then
     log::info "[addon]" "download nodelocaldns manifests"
     local nodelocaldns_file="${OFFLINE_DIR}/manifests/nodelocaldns.yaml"
@@ -2608,6 +2621,7 @@ function add::addon() {
     "
     check::exit_code "$?" "addon" "change nodelocaldns parameter"
     kube::apply "${nodelocaldns_file}"
+    kube::wait "node-local-dns" "kube-system" "pod" "k8s-app=node-local-dns"
   else
     log::warning "[addon]" "No $KUBE_ADDON config."
   fi
@@ -2625,9 +2639,15 @@ function add::monitor() {
     command::exec "${MGMT_NODE}" "
       $(declare -f utils::retry)
       cd \"${OFFLINE_DIR}/manifests/kube-prometheus-${KUBE_PROMETHEUS_VERSION}\" \
-      && utils::retry 6 kubectl apply --wait=true --timeout=10s -f manifests/setup/ \
+      && sed -i -e \"s#registry.k8s.io/prometheus-adapter#${KUBE_IMAGE_REPO}#g\" \
+                -e \"s#registry.k8s.io/kube-state-metrics#${KUBE_IMAGE_REPO}#g\" \
+                -e \"s#quay.io/brancz#${KUBE_IMAGE_REPO}#g\" \
+                -e \"s#quay.io/prometheus-operator#${KUBE_IMAGE_REPO}#g\" \
+                -e \"s#quay.io/prometheus#${KUBE_IMAGE_REPO}#g\" \
+                   manifests/*.yaml  \
+      && utils::retry 6 kubectl apply --server-side --wait=true --timeout=10s -f manifests/setup/ \
       && until kubectl get servicemonitors --all-namespaces ; do date; sleep 1; echo ''; done \
-      && utils::retry 6 kubectl apply --wait=true --timeout=10s -f manifests/
+      && utils::retry 6 kubectl apply  --wait=true --timeout=10s -f manifests/
     "
     check::exit_code "$?" "apply" "add prometheus"
     kube::wait "prometheus" "monitoring" "pods --all"
@@ -2818,8 +2838,8 @@ spec:
           name: inter-node
           protocol: TCP
         volumeMounts:
-        - name: data
-          mountPath: /usr/share/elasticsearch/data
+        - name: localtime
+          mountPath: /etc/localtime
         env:
           - name: cluster.name
             value: k8s-logs
@@ -2830,25 +2850,16 @@ spec:
           - name: discovery.seed_hosts
             value: 'es-cluster-0.elasticsearch,es-cluster-1.elasticsearch,es-cluster-2.elasticsearch'
           - name: cluster.initial_master_nodes
-            value: 'es-cluster-0,es-cluster-1,es-cluster-2' 
-          - name: discovery.zen.minimum_master_nodes
-            value: '2'
+            value: 'es-cluster-0,es-cluster-1,es-cluster-2'
+          - name: xpack.security.enabled
+            value: 'false'
           - name: ES_JAVA_OPTS
             value: '-Xms512m -Xmx512m'
       volumes:
-      - name: data
+      - name: localtime
         hostPath:
-          path: /var/lib/elasticsearch
-          type: DirectoryOrCreate
+          path: /usr/share/zoneinfo/Asia/Shanghai
       initContainers:
-      - name: fix-permissions
-        image: alpine:3.9
-        command: ['sh', '-c', 'chown -R 1000:1000 /usr/share/elasticsearch/data']
-        securityContext:
-          privileged: true
-        volumeMounts:
-        - name: data
-          mountPath: /usr/share/elasticsearch/data
       - name: increase-vm-max-map
         image: alpine:3.9
         command: ['sysctl', '-w', 'vm.max_map_count=262144']
@@ -2866,7 +2877,7 @@ metadata:
   name: elasticsearch
   namespace: kube-logging
   annotations:
-    kubernetes.io/ingress.class: nginx
+    kubernetes.io/ingress.class: ${KUBE_INGRESS}
 spec:
   rules:
   - host: elasticsearch.logging.cluster.local
@@ -2924,6 +2935,13 @@ spec:
             value: http://elasticsearch:9200
         ports:
         - containerPort: 5601
+        volumeMounts:
+        - name: localtime
+          mountPath: /etc/localtime
+      volumes:
+      - name: localtime
+        hostPath:
+          path: /usr/share/zoneinfo/Asia/Shanghai
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -2931,7 +2949,7 @@ metadata:
   name: kibana
   namespace: kube-logging
   annotations:
-    kubernetes.io/ingress.class: nginx
+    kubernetes.io/ingress.class: ${KUBE_INGRESS}
 spec:
   rules:
   - host: kibana.logging.cluster.local
@@ -3008,16 +3026,27 @@ spec:
         effect: NoSchedule
       containers:
       - name: fluentd
-        image: fluent/fluentd-kubernetes-daemonset:v1.14.3-debian-elasticsearch7-1.0
+        image: fluent/fluentd-kubernetes-daemonset:v1.16-debian-elasticsearch8-1
         env:
-          - name:  FLUENT_ELASTICSEARCH_HOST
-            value: elasticsearch.kube-logging.svc.${KUBE_DNSDOMAIN}
-          - name:  FLUENT_ELASTICSEARCH_PORT
-            value: '9200'
-          - name:  FLUENT_ELASTICSEARCH_SCHEME
-            value: http
-          - name:  FLUENTD_SYSTEMD_CONF
-            value: disable
+        - name: K8S_NODE_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: spec.nodeName
+        - name: FLUENT_ELASTICSEARCH_HOST
+          value: elasticsearch.kube-logging.svc.${KUBE_DNSDOMAIN}
+        - name: FLUENT_ELASTICSEARCH_PORT
+          value: '9200'
+        - name: FLUENT_ELASTICSEARCH_SCHEME
+          value: http
+        - name: FLUENTD_SYSTEMD_CONF
+          value: disable
+        - name: FLUENT_CONTAINER_TAIL_EXCLUDE_PATH
+          value: /var/log/containers/fluent*
+        - name: FLUENT_CONTAINER_TAIL_PARSER_TYPE
+          value: cri
+        - name: FLUENT_CONTAINER_TAIL_PARSER_TIME_FORMAT
+          value: '%Y-%m-%dT%H:%M:%S.%L%z'
         resources:
           limits:
             memory: 512Mi
@@ -3027,17 +3056,16 @@ spec:
         volumeMounts:
         - name: varlog
           mountPath: /var/log
-        - name: varlibdockercontainers
-          mountPath: /var/lib/docker/containers
-          readOnly: true
+        - name: localtime
+          mountPath: /etc/localtime
       terminationGracePeriodSeconds: 30
       volumes:
+      - name: localtime
+        hostPath:
+          path: /usr/share/zoneinfo/Asia/Shanghai
       - name: varlog
         hostPath:
           path: /var/log
-      - name: varlibdockercontainers
-        hostPath:
-          path: /var/lib/docker/containers
     " 
     # shellcheck disable=SC2181
     if [[ "$?" == "0" ]]; then
@@ -3154,6 +3182,7 @@ function add::ui() {
     local dashboard_file="${OFFLINE_DIR}/manifests/kubernetes-dashboard.yml"
     utils::download_file "${GITHUB_PROXY}https://raw.githubusercontent.com/kubernetes/dashboard/v${KUBERNETES_DASHBOARD_VERSION}/aio/deploy/recommended.yaml" "${dashboard_file}"
     kube::apply "${dashboard_file}"
+    kube::wait "kubernetes-dashboard" "kubernetes-dashboard" "pod" "k8s-app=kubernetes-dashboard"
     kube::apply "kubernetes dashboard ingress" "
 ---
 apiVersion: networking.k8s.io/v1
@@ -3414,7 +3443,7 @@ function reset::node() {
     [ -f \"\$(which containerd)\" ] && { crictl rm \$(crictl ps -a -q); systemctl stop containerd; rm -rf /etc/containerd/* /var/lib/containerd/*; yum remove -y containerd.io; }
     [ -f \"\$(which crio)\" ] && { crictl rm \$(crictl ps -a -q); systemctl stop crio; rm -rf /etc/crictl.yaml /etc/crio/* /var/run/crio/*; yum remove -y cri-o; }
     [ -f \"\$(which runc)\" ] && { find /run/containers/ /var/lib/containers/ | xargs -n 1 findmnt -n -o TARGET -T | sort | uniq | xargs -r umount -v; rm -rf /var/lib/containers/* /var/run/containers/*; yum remove -y runc; }
-    [ -f \"\$(which haproxy)\" ] && { systemctl stop haproxy; rm -rf /etc/haproxy/*; yum remove -y haproxy; }
+    [ -f \"\$(which haproxy)\" ] && { systemctl stop haproxy; rm -rf /etc/haproxy/* /etc/rsyslog.d/haproxy.conf; yum remove -y haproxy; }
 
     sed -i -e \"/$KUBE_APISERVER/d\" -e '/-worker-/d' -e '/-master-/d' /etc/hosts
     sed -i '/## Kainstall managed start/,/## Kainstall managed end/d' /etc/security/limits.conf /etc/systemd/system.conf /etc/bashrc /etc/rc.local /etc/audit/rules.d/audit.rules
@@ -3422,7 +3451,7 @@ function reset::node() {
     [ -d /var/lib/elasticsearch ] && rm -rf /var/lib/elasticsearch/*
     [ -d /var/lib/longhorn ] &&  rm -rf /var/lib/longhorn/*
     [ -d \"${OFFLINE_DIR:-/tmp/abc}\" ] && rm -rf \"${OFFLINE_DIR:-/tmp/abc}\"
-    for repo in kubernetes.repo docker-ce.repo devel_kubic_libcontainers_stable.repo elrepo.repo
+    for repo in kubernetes.repo docker-ce.repo devel_kubic_libcontainers_stable.repo
     do
       [ -f /etc/yum.repos.d/\${repo} ] && rm -f /etc/yum.repos.d/\${repo}
     done
@@ -3749,6 +3778,7 @@ function update::self {
   log::info "[update]" "download kainstall script to $0"
   command::exec "127.0.0.1" "
     wget --timeout=10 --waitretry=3 --tries=5 --retry-connrefused ${GITHUB_PROXY}https://raw.githubusercontent.com/lework/kainstall/master/kainstall-centos.sh -O /tmp/kainstall-centos.sh || exit 1
+    /bin/cp -fv $0 /tmp/$0-bakup
     /bin/mv -fv /tmp/kainstall-centos.sh \"$0\"
     chmod +x \"$0\"
   "
