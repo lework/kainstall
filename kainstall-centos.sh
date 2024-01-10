@@ -1757,7 +1757,7 @@ function kubeadm::init() {
     PAUSE_VERSION=$(kubeadm config images list 2>/dev/null | awk -F: '/pause/ {print $2}')
     cat << EOF > /etc/kubernetes/kubeadmcfg.yaml
 ---
-apiVersion: kubeadm.k8s.io/v1beta3
+apiVersion: kubeadm.k8s.io/v1beta2
 kind: InitConfiguration
 ${kubelet_nodeRegistration}
 ---
@@ -1814,7 +1814,7 @@ enforceNodeAllocatable:
 - pods
 
 ---
-apiVersion: kubeadm.k8s.io/v1beta3
+apiVersion: kubeadm.k8s.io/v1beta2
 kind: ClusterConfiguration
 kubernetesVersion: $KUBE_VERSION
 controlPlaneEndpoint: $KUBE_APISERVER:6443
@@ -1943,7 +1943,7 @@ function kubeadm::join() {
     command::exec "${host}" "
       cat << EOF > /etc/kubernetes/kubeadmcfg.yaml
 ---
-apiVersion: kubeadm.k8s.io/v1beta3
+apiVersion: kubeadm.k8s.io/v1beta2
 kind: JoinConfiguration
 discovery:
   bootstrapToken:
@@ -1979,7 +1979,7 @@ EOF
       mkdir -p /etc/kubernetes/manifests
       cat << EOF > /etc/kubernetes/kubeadmcfg.yaml
 ---
-apiVersion: kubeadm.k8s.io/v1beta3
+apiVersion: kubeadm.k8s.io/v1beta2
 kind: JoinConfiguration
 discovery:
   bootstrapToken:
@@ -3307,7 +3307,7 @@ function add::ops() {
   [[ "${master_num:-0}" == "0" ]] && master_num=1
   kube::apply "etcd-snapshot" """
 ---
-apiVersion: batch/v1
+apiVersion: batch/v1beta1
 kind: CronJob
 metadata:
   name: etcd-snapshot
